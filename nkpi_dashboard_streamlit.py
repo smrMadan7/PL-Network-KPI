@@ -112,7 +112,7 @@ def plot_bar_chart(df, time_aggregation):
 
     # Update layout
     fig.update_layout(
-        title=title,
+        # title=title,
         xaxis_title=time_aggregation,
         yaxis_title="Views",
         barmode='stack',
@@ -439,19 +439,19 @@ def main():
         pie_fig = plot_pie_chart(focus_area_data)
         st.plotly_chart(pie_fig, use_container_width=True)
 
-        '''loggedin_filter = st.selectbox("Select User Status", ["All", "LoggedIn User(Active)", "LoggedOut User"], index=0)
+        # '''loggedin_filter = st.selectbox("Select User Status", ["All", "LoggedIn User(Active)", "LoggedOut User"], index=0)
 
-        team_search_data = fetch_team_search_data(
-            engine,
-            year=int(selected_year) if selected_year != "All" else None,
-            month=month_mapping.get(selected_month, None) if selected_month != "All" else None,
-            user_status="loggedin" if loggedin_filter == "LoggedIn User(Active)" else ("loggedout" if loggedin_filter == "LoggedOut User" else None)
-        )
+        # team_search_data = fetch_team_search_data(
+        #     engine,
+        #     year=int(selected_year) if selected_year != "All" else None,
+        #     month=month_mapping.get(selected_month, None) if selected_month != "All" else None,
+        #     user_status="loggedin" if loggedin_filter == "LoggedIn User(Active)" else ("loggedout" if loggedin_filter == "LoggedOut User" else None)
+        # )
 
-        st.subheader("Team Search Data")
-        team_search_data = team_search_data.drop(columns=['event_count'])
-        team_search_data.columns = team_search_data.columns.str.replace('_', ' ').str.title().str.replace(' ', '')
-        st.dataframe(team_search_data, use_container_width=True)'''
+        # st.subheader("Team Search Data")
+        # team_search_data = team_search_data.drop(columns=['event_count'])
+        # team_search_data.columns = team_search_data.columns.str.replace('_', ' ').str.title().str.replace(' ', '')
+        # st.dataframe(team_search_data, use_container_width=True)'''
 
 
         with st.expander("Overall Data"):
