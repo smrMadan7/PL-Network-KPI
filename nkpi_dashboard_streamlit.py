@@ -98,7 +98,6 @@ def plot_bar_chart(df, time_aggregation):
         df['week_range'] = df['week_start'].dt.strftime('%b %d') + ' - ' + df['week_end'].dt.strftime('%b %d')
         aggregated_df = df.groupby(['year', 'week_range', 'source_type']).agg({'clicks': 'sum'}).reset_index()
     
-    title = 'Breakdown of user engagement and activity on Directory team profiles'
     
     fig = go.Figure()
 
@@ -356,12 +355,9 @@ def main():
     engine = get_database_connection()
 
     if page == "Team Analysis":
-        st.title("Team Analysis")
+        st.title("Activity -- Directory Teams")
 
-        st.markdown("""
-          This page provides a visualization of team clicks across various events, including "IRL Page," "Team Page," "Member Profile Page," and "Project Page." You can filter the data by selecting a specific year and month. The insights can be displayed either monthly or weekly, depending on your preference.
-          In addition to the team clicks data, the page also includes team search information and the number of teams created each month.
-        """)
+        st.markdown("""Breakdown of user engagement and activity on Directory team profiles""")
 
         df = fetch_team_data(engine)
         df['year'] = df['year'].astype(int)
@@ -371,7 +367,7 @@ def main():
 
         st.markdown(
             f"""
-            <div style="background-color:#f5f5f5; padding:20px; border-radius:8px; text-align:center;">
+            <div style="background-color:#FFD700; padding:20px; border-radius:8px; text-align:center;">
                 <h3>Number of Teams in the Network</h3>
                 <p style="font-size:28px; font-weight:bold; color:#2b2b2b;">{total_teams}</p>
             </div>
@@ -420,7 +416,7 @@ def main():
         col1, col2 = st.columns([1, 3])
         with col1:
             time_aggregation = st.radio(
-                "View by - Month, Week",
+                "View by -",
                 ["Month", "Week"],
                 index=0
             )
@@ -429,7 +425,7 @@ def main():
             fig = plot_bar_chart(df, time_aggregation)
             st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("Teams added to Network")
+        st.subheader("Monthly New Teams")
         teams_per_month = fetch_teams_per_month(
             engine,
             year=int(selected_year) if selected_year != "All" else None,
@@ -443,7 +439,7 @@ def main():
         pie_fig = plot_pie_chart(focus_area_data)
         st.plotly_chart(pie_fig, use_container_width=True)
 
-        loggedin_filter = st.selectbox("Select User Status", ["All", "LoggedIn User(Active)", "LoggedOut User"], index=0)
+        '''loggedin_filter = st.selectbox("Select User Status", ["All", "LoggedIn User(Active)", "LoggedOut User"], index=0)
 
         team_search_data = fetch_team_search_data(
             engine,
@@ -455,7 +451,7 @@ def main():
         st.subheader("Team Search Data")
         team_search_data = team_search_data.drop(columns=['event_count'])
         team_search_data.columns = team_search_data.columns.str.replace('_', ' ').str.title().str.replace(' ', '')
-        st.dataframe(team_search_data, use_container_width=True)
+        st.dataframe(team_search_data, use_container_width=True)'''
 
 
         with st.expander("Overall Data"):
