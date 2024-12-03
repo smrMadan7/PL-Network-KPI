@@ -1226,7 +1226,6 @@ def main():
         ]
     )
 
-    st.write(f"Selected Page: {page}")
     engine = get_database_connection()
 
     if page == "Team Analysis":
