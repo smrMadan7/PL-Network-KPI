@@ -1213,11 +1213,12 @@ def build_target_to_source_query(selected_year, selected_month_num):
 def main():
     st.set_page_config(page_title="nKPI Dashboard", layout="wide")
 
-    page = st.sidebar.selectbox("Choose Dashboard", ["Team Analysis", "Office Hours Analysis", "Usage/Activity","Network Growth","IRL Gathering", "Hackathon/Workshops", "Network Density"])
+    st.sidebar.write("nKPI Dashboard")
 
     engine = get_database_connection()
 
-    if page == "Team Analysis":
+    if st.sidebar.button("Team Analysis"):
+        page = "Team Analysis"        
         st.title("Activity -- Directory Teams")
 
         st.markdown("""Breakdown of user engagement and activity on Directory team profiles""")
@@ -1339,7 +1340,8 @@ def main():
         # st.dataframe(team_search_data, use_container_width=True)'''
 
 
-    elif page == "Office Hours Analysis":
+    elif st.sidebar.button("Office Hours Analysis"):
+        page = "Office Hours Analysis"
         st.title("Activity -- OH")
 
         st.markdown("""
@@ -1575,7 +1577,8 @@ def main():
         st.subheader("Precentage of Teams with Office Hours")
         st.plotly_chart(fig_teams)
 
-    elif page == 'Usage/Activity':
+    elif st.sidebar.button("Usage/Activity"):
+        page = "Usage/Activity"
         st.title("Activity -- Usage/Activity")
 
         st.markdown("""
@@ -1637,7 +1640,8 @@ def main():
         dummy_image_url = "https://plabs-assets.s3.us-west-1.amazonaws.com/Coming+Soon.png"
         st.image(dummy_image_url, caption="Husky Feedback Data", width=900)
 
-    elif page == 'Network Density':
+    elif st.sidebar.button("Network Growth"):
+        page = "Network Growth"
         st.title("Activity --  Network Density")
 
         st.markdown("""
@@ -1686,8 +1690,8 @@ def main():
         dummy_image_url = "https://plabs-assets.s3.us-west-1.amazonaws.com/Coming+Soon.png"
         st.image(dummy_image_url, caption="Telegram Activity Usage", width=900)
 
-    elif page == 'IRL Gathering':
-        st.title("Activity --  IRL Gathering")
+    elif st.sidebar.button("IRL Gathering"):
+        page = "IRL Gathering"
 
         st.markdown("""
             Breakdown of IRL Gathering
@@ -1751,7 +1755,8 @@ def main():
         dummy_image_url = "https://plabs-assets.s3.us-west-1.amazonaws.com/Coming+Soon.png"
         st.image(dummy_image_url, caption="Distribution of speakers and hosts", width=900)
 
-    elif page == 'Hackathon/Workshops':
+    elif st.sidebar.button("Hackathon/Workshops"):
+        page = "Hackathon/Workshops"
         st.title("Activity --  Hackathon/Workshops")
 
         st.markdown("""
@@ -1792,7 +1797,8 @@ def main():
         dummy_image_url = "https://plabs-assets.s3.us-west-1.amazonaws.com/Coming+Soon.png"
         st.image(dummy_image_url, caption="Members Contribution in Hackathon", width=900)
 
-    elif page == 'Network Growth':
+    elif st.sidebar.button("Network Density"):
+        page = "Network Density"
         st.title("Activity --  Network Growth")
 
         st.markdown("""
