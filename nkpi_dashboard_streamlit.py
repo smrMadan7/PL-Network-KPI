@@ -1218,21 +1218,19 @@ def main():
     page = st.sidebar.radio(
         "nKPI Dashboard",
         [
-            "Team Analysis",
-            "Office Hours Analysis",
-            "Usage/Activity",
-            "Network Growth",
-            "IRL Gathering",
-            "Hackathon/Workshops",
+           "Activity - Directory Teams",
+            "Office Hours Usage",
+            "Directory MAUs",
             "Network Density",
-            "Network Strength - LongTerm Connectivity", 
-            "Network Strength - Conversation Based Connectivity"
+            "IRL Gatherings",
+            "Network Growth",
+            "Hackathons"
         ]
     )
 
     engine = get_database_connection()
 
-    if page == "Team Analysis":
+    if page == "Activity - Directory Teams":
         st.title("Activity -- Directory Teams")
 
         st.markdown("""Breakdown of user engagement and activity on Directory team profiles""")
@@ -1280,7 +1278,7 @@ def main():
         selected_month = st.selectbox("Select Month", ["All"] + months, index=0)
 
         user_status_options = ['All', 'LoggedIn', 'LoggedOut']
-        selected_user_status = st.selectbox("Select User Status", user_status_options, index=0)
+        selected_user_status = st.selectbox("Select User Status", user_status_options, index=0, key="user_status_selectbox")
 
         df = calculate_week(df)
 
@@ -1354,8 +1352,8 @@ def main():
         # st.dataframe(team_search_data, use_container_width=True)'''
 
 
-    elif page == "Office Hours Analysis":
-        st.title("Activity -- OH")
+    elif page == "Office Hours Usage":
+        st.title("Office Hours Usage")
         
         st.markdown("""
             Breakdown of OH activity on Member and Team Profile
@@ -1590,8 +1588,8 @@ def main():
         st.subheader("Precentage of Teams with Office Hours")
         st.plotly_chart(fig_teams)
 
-    elif page == 'Usage/Activity':
-        st.title("Activity -- Usage/Activity")
+    elif page == 'Directory MAUs':
+        st.title("Directory MAUs")
 
         st.markdown("""
             Breakdown of Usage/ctivity
@@ -1653,7 +1651,18 @@ def main():
         st.image(dummy_image_url, caption="Husky Feedback Data", width=900)
 
     elif page == 'Network Density':
-        st.title("Activity --  Network Density")
+        st.title("Network Density")
+
+
+        # Member Connection Strength
+        st.subheader("Member Connection Strength")
+        file_path = "./network-strength/followersfollowing.csv"
+        networkStrength(file_path, "member-strength")
+       
+        # Team Connection Strength
+        st.subheader("Team Connection Strength")
+        file_path1 = "./network-strength/Connections_TwitInteractions.csv"
+        networkStrength(file_path1, "team-strength")
 
         st.markdown("""
             Breakdown of Network Density
@@ -1682,8 +1691,8 @@ def main():
             'July', 'August', 'September', 'October', 'November', 'December'
         ]
 
-        selected_year = st.selectbox("Select Year", years, index=0)
-        selected_month = st.selectbox("Select Month", ["All"] + months, index=0)
+        selected_year = st.selectbox("Select Year", years, index=0, key="year_selectbox")
+        selected_month = st.selectbox("Select Month", ["All"] + months, index=0,  key="month_selectbox")
 
         st.subheader("Network density by Month")
         dummy_image_url = "https://plabs-assets.s3.us-west-1.amazonaws.com/Coming+Soon.png"
@@ -1713,8 +1722,8 @@ def main():
         file_path = "./network-strength/Connections_TwitInteractions.csv"
         networkStrength(file_path)
        
-    elif page == 'IRL Gathering':
-        st.title("Activity --  IRL Gathering")
+    elif page == 'IRL Gatherings':
+        st.title("IRL Gatherings")
 
         st.markdown("""
             Breakdown of IRL Gathering
@@ -1778,8 +1787,8 @@ def main():
         dummy_image_url = "https://plabs-assets.s3.us-west-1.amazonaws.com/Coming+Soon.png"
         st.image(dummy_image_url, caption="Distribution of speakers and hosts", width=900)
 
-    elif page == 'Hackathon/Workshops':
-        st.title("Activity --  Hackathon/Workshops")
+    elif page == 'Hackathons':
+        st.title("Hackathons")
 
         st.markdown("""
             Breakdown of Hackathon/Workshops
@@ -1820,7 +1829,7 @@ def main():
         st.image(dummy_image_url, caption="Members Contribution in Hackathon", width=900)
 
     elif page == 'Network Growth':
-        st.title("Activity --  Network Growth")
+        st.title("Network Growth")
 
         st.markdown("""
             Breakdown of Network Growth
@@ -1948,7 +1957,7 @@ def create_stacked_bar_chart(selected_category, team_stats):
 
     st.plotly_chart(fig)
 
-def display_filters(df):
+def display_filters(df, key="test"):
     """Displays the network filters and applies the selected filter."""
     avg_connections = df['ConnectionCount'].mean()
     max_connections = df['ConnectionCount'].max()
@@ -1956,7 +1965,8 @@ def display_filters(df):
 
     filter_option = st.selectbox(
         "Filter by connection count",
-        options=["None", "Above Average", "Below Average", "Minimum", "Maximum"]
+        options=["None", "Above Average", "Below Average", "Minimum", "Maximum"],
+        key=f"{key}-filter_option_selectbox"
     )
 
     if filter_option == "None":
@@ -2026,7 +2036,7 @@ def visualize_network(filtered_df):
     source_code = HtmlFile.read()
     components.html(source_code, height=900, width=1100, scrolling=True)
 
-def networkStrength(file_path):
+def networkStrength(file_path, key="test"):
             # Load the selected CSV file
         df = load_data(file_path)
         df['ConnectionCount'] = df['NetworkConnections'].apply(lambda x: len(x.split(',')))
@@ -2046,26 +2056,27 @@ def networkStrength(file_path):
         st.progress(team_strength_percentage / 100)
 
         # Dropdown for Members or Teams
-        selection_type = st.selectbox("Select:", options=["Member", "Team"])
+        selection_type = st.selectbox("Select:", options=["Member", "Team"], index=0, key=f"{key}-meber-team-selection_type_selectbox")
 
         if selection_type == "Member":
             # Dropdown for members
             unique_members = df['Member'].unique()
-            selected_member = st.selectbox("Select a member:", options=['All'] + list(unique_members))
+            selected_member = st.selectbox("Select a member:", options=['All'] + list(unique_members), key=f"{key}-member_selectbox")
 
             if selected_member != 'All':
                 filtered_df = df[(df['Member'] == selected_member) | (df['NetworkConnections'] == selected_member)]
                 visualize_network(filtered_df)
             else:
-                option, filtered_df = display_filters(df)
+                option, filtered_df = display_filters(df, key)
                 if not filtered_df.empty:
-                    st.dataframe(filtered_df, height=300)  # Display DataFrame with a scrollable view
+                    #st.dataframe(filtered_df, height=300)  # Display DataFrame with a scrollable view
                     csv_data = filtered_df.to_csv(index=False).encode('utf-8')
                     st.download_button(
                         label=f"Download Network Connectivity Data as CSV",
                         data=csv_data,
                         file_name=f"{option}_network_connectivity_data.csv",
-                        mime='text/csv'
+                        mime='text/csv',
+                        key=f"{key}-download_button"
                     )
                     visualize_network(filtered_df)
 
