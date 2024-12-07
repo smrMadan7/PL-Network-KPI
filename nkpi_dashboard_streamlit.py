@@ -1359,296 +1359,231 @@ def main():
             Breakdown of OH activity on Member and Team Profile
         """)
 
-        total_interactions = fetch_total_interaction_count(engine)
+        df = load_data("./OH/OH-Data-Members.csv")
 
-        st.markdown(
-            f"""
-            <div style="background-color:#FFD700; padding:20px; border-radius:8px; text-align:center;">
-                <h3>Number of OH initiated</h3>
-                <p style="font-size:28px; font-weight:bold; color:#2b2b2b;">{total_interactions}</p>
-            </div>
-            """,
-            unsafe_allow_html=True
+        # # Display the raw data
+        # st.subheader("Raw Data")
+        # st.dataframe(df)
+# no_users_w_oh,precent_users_w_oh,month,Year,total_users,no_teams_w_oh,percent_teams_w_oh,total_teams
+
+ 
+        # Combine `month` and `Year` columns to create a `month_year` column
+        # df['month_year'] = df['month'] + " " + df['Year'].astype(str)
+
+        try:
+            # Convert `month` to datetime (assuming it has both month and year)
+            df['month'] = pd.to_datetime(df['month'], format='%b %Y')
+        except ValueError:
+            st.error("Ensure the `month` column is in the format 'Nov 2022'.")
+            st.stop()
+
+        df = load_data("./OH/OH-Data-Members.csv")
+
+        # Convert `month` to datetime for sorting
+        df['month'] = pd.to_datetime(df['month'], format='%b %Y')
+        df = df.sort_values(by='month')
+
+
+        # ---- Bar Chart for Counts ----
+        st.subheader("Bar Chart: Counts for Users and Teams with Office Hours")
+
+        # Create the count bar chart
+        fig_count = go.Figure()
+
+        # Add bars for `no_users_w_oh`
+        fig_count.add_trace(go.Bar(
+            x=df['month'].dt.strftime('%b %Y'),
+            y=df['no_users_w_oh'],
+            name='Users with Office Hours (Count)',
+            marker_color='skyblue',
+            hoverinfo='text',
+            text=[f"{val} Users" for val in df['no_users_w_oh']]
+        ))
+
+        # Add bars for `no_teams_w_oh`
+        fig_count.add_trace(go.Bar(
+            x=df['month'].dt.strftime('%b %Y'),
+            y=df['no_teams_w_oh'],
+            name='Teams with Office Hours (Count)',
+            marker_color='red',
+            hoverinfo='text',
+            text=[f"{val} Teams" for val in df['no_teams_w_oh']]
+        ))
+
+        # Customize layout for the count chart
+        fig_count.update_layout(
+            title="Users and Teams with Office Hours (Count)",
+            xaxis_title="Month",
+            yaxis_title="Count",
+            barmode='stack',  # Grouped bar chart
+            xaxis_tickangle=-45,
+            showlegend=True
         )
 
-        st.subheader("Filters")
-        years = ["All", "2022","2023","2024"] 
+        # Display the count bar chart
+        st.plotly_chart(fig_count)
 
-        month_mapping = {
-            "January": 1,
-            "February": 2,
-            "March": 3,
-            "April": 4,
-            "May": 5,
-            "June": 6,
-            "July": 7,
-            "August": 8,
-            "September": 9,
-            "October": 10,
-            "November": 11,
-            "December": 12
-        }
+        # ---- Bar Chart for Percentages ----
+        st.subheader("Bar Chart: Percentages for Users and Teams with Office Hours")
 
-        months = [
-            'January', 'February', 'March', 'April', 'May', 'June', 
-            'July', 'August', 'September', 'October', 'November', 'December'
-        ]
+        # Create the percentage bar chart
+        fig_percent = go.Figure()
 
-        selected_year = st.selectbox("Select Year", years, index=0)
-        selected_month = st.selectbox("Select Month", ["All"] + months, index=0)
+        # Add bars for `precent_users_w_oh`
+        fig_percent.add_trace(go.Bar(
+            x=df['month'].dt.strftime('%b %Y'),
+            y=df['precent_users_w_oh'],
+            name='Users with Office Hours (%)',
+            marker_color='skyblue',
+            hoverinfo='text',
+            text=[f"{val}% Users" for val in df['precent_users_w_oh']]
+        ))
 
-        # Fetch data from the database based on selected filters
-        query = fetch_oh_data(selected_year, selected_month, month_mapping)
-        df = load_data_from_db(query)
+        # Add bars for `percent_teams_w_oh`
+        fig_percent.add_trace(go.Bar(
+            x=df['month'].dt.strftime('%b %Y'),
+            y=df['percent_teams_w_oh'],
+            name='Teams with Office Hours (%)',
+            marker_color='red',
+            hoverinfo='text',
+            text=[f"{val}% Teams" for val in df['percent_teams_w_oh']]
+        ))
 
-        df['month_name'] = df['month'].apply(lambda x: list(month_mapping.keys())[list(month_mapping.values()).index(x)] if x in month_mapping.values() else 'Unknown')
-
-        st.subheader(f"Breakdown of OH by Month, Year of Team/Member")
-
-        breakdown_type = st.radio("Select Breakdown", ["Member Breakdown", "Team Breakdown"], index=0)
-
-        fig = plot_bar_chart_of_OH(df, breakdown_type)
-        st.plotly_chart(fig, use_container_width=True)
-
-        with st.expander("Overall OH"):
-
-            df.columns = df.columns.str.lower().str.replace(' ', '_')
-
-            if 'id' in df.columns:
-                df = df.drop(columns=['id'])
-
-            columns_to_drop = ['year', 'month', 'month_order', 'month_name', 'page_type']
-            df['OH_Initiated_Source'] = df['page_type']
-
-            df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
-            df.columns = df.columns.str.replace('_', ' ').str.title().str.replace(' ', ' ')
-
-            st.dataframe(df, use_container_width=True)
-
-        selected_month_num = month_mapping.get(selected_month, None) if selected_month != "All" else None
-
-        st.subheader(f"Office Hours - LeaderBoard")
-
-        source_to_target_query = build_source_to_target_query(selected_year, selected_month_num)
-        target_to_source_query = build_target_to_source_query(selected_year, selected_month_num)
-        source_to_team_target_query = build_source_to_team_query(selected_year, selected_month_num)
-
-        source_to_target_df = load_data_from_db(source_to_target_query)
-        target_to_source_df = load_data_from_db(target_to_source_query)
-        source_to_target_team_df = load_data_from_db(source_to_team_target_query)
-
-        plot_top_10_interaction_count(source_to_target_df, "Source Members with the Most Interactions", "purple", "Source")
-
-        with st.expander("Overall OH Breakdown of Source with Target members by Date"):
-
-            source_to_target_df.columns = source_to_target_df.columns.str.lower().str.replace(' ', '_')
-
-            if 'id' in source_to_target_df.columns:
-                source_to_target_df = source_to_target_df.drop(columns=['id'])
-
-            columns_to_drop = ['year', 'month', 'month_order', 'month_name', 'source_member_name', 'target_name', 'interaction_count', 'date']
-
-            source_to_target_df['Initiated By'] = source_to_target_df['source_member_name']
-            source_to_target_df['Initiated To'] = source_to_target_df['target_name']
-            source_to_target_df['Interaction Count'] = source_to_target_df['interaction_count']
-            source_to_target_df['Date'] = source_to_target_df['date']
-            source_to_target_df = source_to_target_df.drop(columns=[col for col in columns_to_drop if col in source_to_target_df.columns])
-            source_to_target_df.columns = source_to_target_df.columns.str.replace('_', ' ').str.title().str.replace(' ', ' ')
-
-            st.dataframe(source_to_target_df, use_container_width=True)
-
-        plot_top_10_interaction_count(target_to_source_df, "Target Members with the Most Interactions", "orange", "Target")
-
-        with st.expander("Overall OH Breakdown of Target with Source members by Date"):
-
-            target_to_source_df.columns = target_to_source_df.columns.str.lower().str.replace(' ', '_')
-
-            if 'id' in target_to_source_df.columns:
-                target_to_source_df = target_to_source_df.drop(columns=['id'])
-
-            columns_to_drop = ['year', 'month', 'month_order', 'month_name','target_member_name', 'source_member_name', 'interaction_count', 'date']
-
-            target_to_source_df['Initiated By'] = target_to_source_df['target_member_name']
-            target_to_source_df['Initiated To'] = target_to_source_df['source_member_name']
-            target_to_source_df['Interaction Count'] = target_to_source_df['interaction_count']
-            target_to_source_df['Date'] = target_to_source_df['date']
-
-            target_to_source_df = target_to_source_df.drop(columns=[col for col in columns_to_drop if col in target_to_source_df.columns])
-            target_to_source_df.columns = target_to_source_df.columns.str.replace('_', ' ').str.title().str.replace(' ', ' ')
-
-            st.dataframe(target_to_source_df, use_container_width=True)
-
-        plot_top_10_interaction_count(source_to_target_team_df, "Source Members with the Most Team Interactions", "red", "Source")
-
-        with st.expander("Overall OH Breakdown of Source members with Target Team by Date"):
-
-            source_to_target_team_df.columns = source_to_target_team_df.columns.str.lower().str.replace(' ', '_')
-
-            if 'id' in source_to_target_team_df.columns:
-                source_to_target_team_df = source_to_target_team_df.drop(columns=['id'])
-
-            columns_to_drop = ['year', 'month', 'month_order', 'month_name', 'source_member_name', 'target_name', 'interaction_count', 'date']
-
-            source_to_target_team_df['Initiated By'] = source_to_target_team_df['source_member_name']
-            source_to_target_team_df['Team Name'] = source_to_target_team_df['target_name']
-            source_to_target_team_df['Interaction Count'] = source_to_target_team_df['interaction_count']
-            source_to_target_team_df['Date'] = source_to_target_team_df['date']
-
-            source_to_target_team_df = source_to_target_team_df.drop(columns=[col for col in columns_to_drop if col in source_to_target_team_df.columns])
-            source_to_target_team_df.columns = source_to_target_team_df.columns.str.replace('_', ' ').str.title().str.replace(' ', ' ')
-
-            st.dataframe(source_to_target_team_df, use_container_width=True)
-
-        df = fetch_member_interactions_data(engine, selected_year, selected_month)
-
-        st.subheader("OH Feedback Data")
-
-        df.columns = df.columns.str.lower().str.replace(' ', '_')
-
-        if 'id' in df.columns:
-            df = df.drop(columns=['id'])
-
-        columns_to_drop = ['year']
-
-        df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
-        df.columns = df.columns.str.replace('_', ' ').str.title().str.replace(' ', ' ')
-        st.dataframe(df, use_container_width=True)
-
-        members_with_office_hours = get_members_with_office_hours(engine)
-        total_members = get_total_members(engine)
-        teams_with_office_hours = get_teams_with_office_hours(engine)
-        total_teams = get_total_teams(engine)
-
-        # Calculate percentages
-        members_percentage = (members_with_office_hours / total_members) * 100
-        teams_percentage = (teams_with_office_hours / total_teams) * 100
-
-        # Prepare data for pie chart
-        labels = ['Members with Office Hours', 'Members without Office Hours']
-        sizes = [members_percentage, 100 - members_percentage]
-
-        labels_teams = ['Teams with Office Hours', 'Teams without Office Hours']
-        sizes_teams = [teams_percentage, 100 - teams_percentage]
-
-        # Create Pie Chart for Members using Plotly
-        fig_members = go.Figure(data=[go.Pie(
-            labels=labels,
-            values=sizes,
-            hole=0.3,  # Makes the pie chart donut-shaped for better readability
-            hoverinfo="label+percent",
-            textinfo="percent",
-            marker=dict(colors=['#66b3ff', '#ff9999']),
+        # Customize layout for the percentage chart
+        fig_percent.update_layout(
+            title="Users and Teams with Office Hours (Percentage)",
+            xaxis_title="Month",
+            yaxis_title="Percentage",
+            barmode='stack',  
+            xaxis_tickangle=-45,
             showlegend=True
+        )
+
+        # Display the percentage bar chart
+        st.plotly_chart(fig_percent)
+
+
+        total_scheduled = 62
+        confirmed_meetings = 19
+        gave_feedback = 43
+        did_not_give_feedback = 62 - gave_feedback  # Total scheduled - feedback given
+        nps_from_feedback = "80%"
+
+        # Pie chart for the number of confirmed meetings vs total scheduled
+        fig_confirmed_meetings = go.Figure(data=[go.Pie(
+            labels=["Confirmed Meetings", "Unconfirmed Meetings","Gave Feedback", "Did Not Give Feedback"],
+            values=[confirmed_meetings, total_scheduled - confirmed_meetings,gave_feedback, did_not_give_feedback],
+            marker=dict(colors=["#1f77b4", "#ff7f0e","#2ca02c", "#d62728"]),
+            hoverinfo="label+percent",
+            textinfo="value+percent"
         )])
 
-        fig_members.update_layout(
-            # title="Members with and without Office Hours",
-            # title_x=0.5,
-            width=600,  
-            height=600, 
-            margin=dict(t=50, b=50, l=50, r=50), 
-            legend=dict(
-                x=1,  
-                y=1,
-                traceorder='normal',
-                orientation='v', 
-                font=dict(size=12),
-                borderwidth=1
+    
+
+        # Streamlit layout
+        st.title("Meeting Feedback Analysis")
+
+        # Display Pie charts
+        st.plotly_chart(fig_confirmed_meetings)
+
+
+        st.title("Aggregated OH Data")
+        df = load_data("./OH/OH Data-AggregatedOHs.csv")
+
+        # Check if the CSV has the necessary columns
+        if "Date" in df.columns and "user-oh" in df.columns and "irl-user-oh" in df.columns and "team-oh" in df.columns and "combined-oh" in df.columns:
+            
+            # Convert the 'Date' column to datetime for better handling
+            df['Date'] = pd.to_datetime(df['Date'], format='%d-%b-%Y')
+            # Create the bar chart
+            st.subheader("Bar Chart of Office Hours")
+
+            # Create a bar chart using Plotly
+            fig = go.Figure()
+
+            # Add bars for each category
+            fig.add_trace(go.Bar(
+                x=df['Date'],
+                y=df['user-oh'],
+                name='User OH',
+                marker_color='skyblue',
+                hoverinfo='text',
+                text=[f"{val} User OH" for val in df['user-oh']]
+            ))
+
+            fig.add_trace(go.Bar(
+                x=df['Date'],
+                y=df['irl-user-oh'],
+                name='IRL User OH',
+                marker_color='lightgreen',
+                hoverinfo='text',
+                text=[f"{val} IRL User OH" for val in df['irl-user-oh']]
+            ))
+
+            fig.add_trace(go.Bar(
+                x=df['Date'],
+                y=df['team-oh'],
+                name='Team OH',
+                marker_color='red',
+                hoverinfo='text',
+                text=[f"{val} Team OH" for val in df['team-oh']]
+            ))
+
+            fig.add_trace(go.Bar(
+                x=df['Date'],
+                y=df['combined-oh'],
+                name='Combined OH',
+                marker_color='lightcoral',
+                hoverinfo='text',
+                text=[f"{val} Combined OH" for val in df['combined-oh']]
+            ))
+
+            # Update layout for better visualization
+            fig.update_layout(
+                title="Office Hours for Different Categories Over Time",
+                xaxis_title="Date",
+                yaxis_title="Office Hours",
+                barmode='stack',  # Stacked bar chart
+                xaxis_tickangle=-45,  # Rotate x-axis labels for readability
+                showlegend=True
             )
-        )
 
-        st.subheader("Percentage of Members with Office Hours")
-        st.plotly_chart(fig_members)
+            # Display the Plotly chart in Streamlit
+            st.plotly_chart(fig)
 
-        fig_teams = go.Figure(data=[go.Pie(
-            labels=labels_teams,
-            values=sizes_teams,
-            hole=0.3,  
-            hoverinfo="label+percent",
-            textinfo="percent",
-            marker=dict(colors=['#99ff99', '#ffcc99']),
-            showlegend=True
-        )])
+        else:
+            st.error("The CSV file is missing some required columns. Please ensure the file contains 'Date', 'user-oh', 'irl-user-oh', 'team-oh', and 'combined-oh' columns.")
 
-        fig_teams.update_layout(
-            # title="Teams with and without Office Hours",
-            # title_x=0.5,
-            width=600,  
-            height=600,  
-            margin=dict(t=50, b=50, l=50, r=50),  
-            legend=dict(
-                x=1,  
-                y=1,
-                traceorder='normal',
-                orientation='v',  
-                font=dict(size=12),
-                borderwidth=1
+
+
+        
+        st.title("Responses PMF-v1")
+        df = load_data("./OH/OH Data-PMFv1.csv")
+
+            # Check if the CSV has the necessary columns
+        if "Response Category" in df.columns and "Count" in df.columns and "Percentage" in df.columns:
+            
+        
+            # Pie chart using Plotly
+            fig = go.Figure(data=[go.Pie(
+                labels=df['Response Category'],
+                values=df['Count'],
+                hoverinfo='label+percent',  # Show label and percentage
+                textinfo='percent',  # Display percentage on the chart
+                marker=dict(colors=["#1f77b4", "#ff7f0e", "#2ca02c"])  # Customize the colors
+            )])
+
+            # Update layout for better visualization
+            fig.update_layout(
+                title="Distribution of Response Categories",
+                showlegend=True
             )
-        )
-        st.subheader("Precentage of Teams with Office Hours")
-        st.plotly_chart(fig_teams)
 
-    elif page == 'Directory MAUs':
-        st.title("Directory MAUs")
-
-        st.markdown("""
-            Breakdown of Usage/ctivity
-        """)
-
-        st.subheader("Filters")
-        years = ["All", "2024"] 
-
-        month_mapping = {
-            "January": 1,
-            "February": 2,
-            "March": 3,
-            "April": 4,
-            "May": 5,
-            "June": 6,
-            "July": 7,
-            "August": 8,
-            "September": 9,
-            "October": 10,
-            "November": 11,
-            "December": 12
-        }
-
-        months = [
-            'January', 'February', 'March', 'April', 'May', 'June', 
-            'July', 'August', 'September', 'October', 'November', 'December'
-        ]
-
-        selected_year = st.selectbox("Select Year", years, index=0)
-        selected_month = st.selectbox("Select Month", ["All"] + months, index=0)
-        user_status_options = ['All', 'LoggedIn', 'LoggedOut']
-        loggedin_filter = st.selectbox("Select User Status", ["All", "LoggedIn User", "LoggedOut User"], index=0)
-        team_search_data = fetch_team_search_data(
-            engine,
-            year=int(selected_year) if selected_year != "All" else None,
-            month=month_mapping.get(selected_month, None) if selected_month != "All" else None,
-            user_status="loggedin" if loggedin_filter == "LoggedIn User" else ("loggedout" if loggedin_filter == "LoggedOut User" else None)
-        )
-
-        st.subheader("Team Search Data")
-        team_search_data = team_search_data.drop(columns=['event_count'])
-        team_search_data.columns = team_search_data.columns.str.replace('_', ' ').str.title().str.replace(' ', ' ')
-        st.dataframe(team_search_data, use_container_width=True)
-
-        st.subheader("Active User")
-        dummy_image_url = "https://plabs-assets.s3.us-west-1.amazonaws.com/Coming+Soon.png"
-        st.image(dummy_image_url, caption="Active User Overview", width=900)
-
-        st.subheader("Interacted with husky")
-        dummy_image_url = "https://plabs-assets.s3.us-west-1.amazonaws.com/Coming+Soon.png"
-        st.image(dummy_image_url, caption="Husky Overview", width=900)
-
-        st.subheader("HomePage Interaction")
-        dummy_image_url = "https://plabs-assets.s3.us-west-1.amazonaws.com/Coming+Soon.png"
-        st.image(dummy_image_url, caption="Homepage Overview", width=900)
-
-        st.subheader("Husky Feedback Data")
-        dummy_image_url = "https://plabs-assets.s3.us-west-1.amazonaws.com/Coming+Soon.png"
-        st.image(dummy_image_url, caption="Husky Feedback Data", width=900)
+            # Display the Plotly pie chart
+            st.plotly_chart(fig)
+            
+        else:
+            st.error("The CSV file is missing some required columns. Please ensure the file contains 'Response Category', 'Count', and 'Percentage' columns.")
 
     elif page == 'Network Density':
         st.title("Network Density")
