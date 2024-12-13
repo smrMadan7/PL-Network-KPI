@@ -1210,7 +1210,7 @@ def build_target_to_source_query(selected_year, selected_month_num):
 
     return base_query
 
-def fetch_events_by_month(engine, selected_year, selected_month):
+def fetch_events_by_month_location(engine, selected_year, selected_month):
     # Build the SQL query dynamically based on the selected year and month
     query = """
         SELECT 
@@ -2110,12 +2110,15 @@ def fetch_data_from_db_pagetype(engine, selected_year, selected_month):
     WHERE properties->'$set'->>'$current_url' IS NOT NULL
     """
 
+    # Convert selected_month to its numeric value
+    selected_month_num = month_mapping.get(selected_month, None)
+
     # Apply filters based on the selected year and month
     if selected_year != "All":
-        query += f" AND EXTRACT(YEAR FROM timestamp_column) = {selected_year}"
+        query += f" AND EXTRACT(YEAR FROM timestamp) = {selected_year}"
     
     if selected_month != "All":
-        query += f" AND EXTRACT(MONTH FROM timestamp_column) = {selected_month}"
+        query += f" AND EXTRACT(MONTH FROM timestamp) = {selected_month_num}"
 
     query += """
     GROUP BY page_type
@@ -2149,7 +2152,7 @@ def plot_events_by_page_type(df):
     
     return fig
 
-def fetch_data_from_db(engine):
+def fetch_data_from_db(engine, selected_year, selected_month):
     # Execute the SQL query
     query = """
     SELECT
@@ -2168,6 +2171,19 @@ def fetch_data_from_db(engine):
         COUNT(*) AS event_count
     FROM public.posthogevents
     WHERE properties->'$set'->>'$current_url' IS NOT NULL
+    """
+
+    # Convert selected_month to its numeric value
+    selected_month_num = month_mapping.get(selected_month, None)
+
+    # Apply filters based on the selected year and month
+    if selected_year != "All":
+        query += f" AND EXTRACT(YEAR FROM timestamp) = {selected_year}"
+    
+    if selected_month != "All":
+        query += f" AND EXTRACT(MONTH FROM timestamp) = {selected_month_num}"
+
+    query += """
     GROUP BY page_type, current_url
     ORDER BY page_type, event_count DESC;
     """
@@ -2564,9 +2580,23 @@ def main():
     elif page == "Directory MAUs":
         st.title("Active User Analysis")
 
-        st.markdown("""
-            Monthly Directory Active User
-        """)
+        df = fetch_average_session_time(engine)
+        avg_minutes = int(df['average_duration_minutes'][0])
+        avg_seconds = int(df['average_duration_seconds'][0])
+
+        # Display the results
+        st.header("Session Duration Summary")
+        # st.metric("Average Session Duration", f"{avg_minutes} min {avg_seconds} sec")
+
+        st.markdown(
+            f"""
+            <div style="background-color:#FFD700; padding:20px; border-radius:8px; text-align:center;">
+                <h3>Average Session Duration</h3>
+                <p style="font-size:28px; font-weight:bold; color:#2b2b2b;">{avg_minutes} min {avg_seconds} sec</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
         st.subheader("Filters")
         years = ["All", "2024"] 
@@ -2604,25 +2634,7 @@ def main():
             month_mapping = {name: i for i, name in enumerate(months[1:], start=1)}
             df = df[df['month'] == month_mapping[selected_month]]
 
-        df = fetch_average_session_time(engine)
-        avg_minutes = int(df['average_duration_minutes'][0])
-        avg_seconds = int(df['average_duration_seconds'][0])
-
-        # Display the results
-        st.header("Session Duration Summary")
-        # st.metric("Average Session Duration", f"{avg_minutes} min {avg_seconds} sec")
-
-        st.markdown(
-            f"""
-            <div style="background-color:#FFD700; padding:20px; border-radius:8px; text-align:center;">
-                <h3>Average Session Duration</h3>
-                <p style="font-size:28px; font-weight:bold; color:#2b2b2b;">{avg_minutes} min {avg_seconds} sec</p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        st.subheader("Monthly Active User Count")
+        st.subheader("Monthly Active Users")
         df['formatted_month'] = df['month_year'].dt.strftime('%b %Y')  # Format X-axis labels
 
         fig_active_users = px.bar(
@@ -2653,7 +2665,7 @@ def main():
         fig = plot_events_by_page_type(df)
         st.plotly_chart(fig, use_container_width=True)
 
-        df = fetch_data_from_db(engine)
+        df = fetch_data_from_db(engine, selected_year, selected_month)
 
         # Dropdown to select the page type
         page_type = st.selectbox(
@@ -2778,7 +2790,7 @@ def main():
         engine = get_database_connection()
 
         # Fetch the data based on the selected filters
-        df = fetch_events_by_month(engine, selected_year, selected_month)
+        df = fetch_events_by_month_location(engine, selected_year, selected_month)
         df['event_month'] = pd.to_datetime(df['event_month'])
 
         # Plot the graph
