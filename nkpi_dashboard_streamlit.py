@@ -50,7 +50,7 @@ def fetch_team_data(engine):
     COALESCE(
         pe.properties->>'loggedInUserName', 
         pe.properties->'user'->>'name',
-        'Untracked User'
+        'Guest User'
     ) AS Viewed_By,
     pe.timestamp,
     EXTRACT(MONTH FROM pe.timestamp) AS month,  -- Extract as number
@@ -70,7 +70,7 @@ def fetch_team_data(engine):
     END AS user_status,
     -- Combine logged-in and logged-out users into a single row for each user
     CASE
-        WHEN (pe.properties->>'loggedInUserEmail' IS NULL AND pe.properties->'user'->>'email' IS NULL) THEN 'Untracked'
+        WHEN (pe.properties->>'loggedInUserEmail' IS NULL AND pe.properties->'user'->>'email' IS NULL) THEN 'Guest'
         ELSE COALESCE(
             pe.properties->>'loggedInUserName', 
             pe.properties->'user'->>'name'
@@ -202,7 +202,7 @@ def fetch_team_search_data(engine, year=None, month=None, user_status=None):
             COALESCE(
                 NULLIF(properties->>'loggedInUserName', ''),  
                 NULLIF(properties->'user'->>'name', ''),  
-                'Untracked User'  
+                'Guest User'  
             ) AS searched_by,
             (properties->>'value') AS team_search_value,
             TO_CHAR("timestamp", 'YYYY-MM-DD') AS date,
@@ -1582,9 +1582,10 @@ def fetch_event_topic_distribution(engine, selected_year, selected_month):
     
     return pd.read_sql(query, engine)
 
-# Function to visualize event topic distribution as a bar chart
+
 def visualize_event_topic_distribution(engine, selected_year, selected_month):
-    st.subheader("Top 10 Distribution of Events by Topic")
+    st.subheader("Top Events by Topic")
+    st.markdown("Distribution of events by topic")
     
     # Fetch data based on selected filters
     df = fetch_event_topic_distribution(engine, selected_year, selected_month)
@@ -2157,6 +2158,7 @@ def fetch_data_from_db_pagetype(engine, selected_year, selected_month):
             THEN 'IRL Details Page'
             ELSE 'Other'
         END AS page_type,
+        EXTRACT(MONTH FROM timestamp) AS month,
         COUNT(*) AS event_count
     FROM public.posthogevents
     WHERE properties->'$set'->>'$current_url' IS NOT NULL
@@ -2173,8 +2175,8 @@ def fetch_data_from_db_pagetype(engine, selected_year, selected_month):
         query += f" AND EXTRACT(MONTH FROM timestamp) = {selected_month_num}"
 
     query += """
-    GROUP BY page_type
-    ORDER BY page_type;
+    GROUP BY page_type, month
+    ORDER BY month, page_type;
     """
 
     # Execute the query and load the result into a DataFrame
@@ -2182,30 +2184,36 @@ def fetch_data_from_db_pagetype(engine, selected_year, selected_month):
 
 
 def plot_events_by_page_type(df):
-    # Create a bar plot for the event counts by page type
+    # Plot a bar chart with page_type as the legend
     fig = px.bar(
-        df,
-        x='page_type',
-        y='event_count',
-        # title='Event Count by Page Type',
-        labels={'event_type': 'Page Type', 'event_count': 'Event Count'},
-        color='page_type',
-        text='event_count',
-        template='plotly_dark'
+        df, 
+        x="month", 
+        y="event_count", 
+        color="page_type",  # Color by page_type
+        labels={"month": "Month", "event_count": "Event Count", "page_type": "Page Type"},
+        barmode="group",  # Group bars by month
+        hover_data={"page_type": True, "event_count": True, "month": True}
     )
-    
-    # Display the plot in Streamlit
-    fig.update_traces(texttemplate='%{text}', textposition='auto')
+
+    # Customize the layout
     fig.update_layout(
-        xaxis_title="Page Type",
-        yaxis_title="Event Count",
-        showlegend=False
+        xaxis_title="Month",
+        yaxis_title="Number of Events",
+        showlegend=True,
+        title="Event Count by Page Type for Each Month"
     )
-    
+
+    # Update the x-axis to display month names instead of numbers
+    fig.update_xaxes(
+        tickmode='array',
+        tickvals=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        ticktext=["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    )
+
     return fig
 
 def fetch_data_from_db(engine, selected_year, selected_month):
-    # Execute the SQL query
+    # Base SQL query with page type and entity name extraction
     query = """
     SELECT
         CASE
@@ -2219,9 +2227,39 @@ def fetch_data_from_db(engine, selected_year, selected_month):
             WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/irl?search%%' THEN 'IRL Search'
             ELSE 'Other'
         END AS page_type,
-        properties->'$set'->>'$current_url' AS current_url,
-        COUNT(*) AS event_count
+        COUNT(*) AS event_count,
+        -- Member Name (join with the 'members' table using the UID from the URL)
+        CASE
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/members/%%' THEN m.name
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/projects/%%' THEN p.name
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/teams/%%' THEN t.name
+            ELSE NULL
+        END AS entity_name,
+        -- For Project Search, extract the value after 'search='
+        CASE
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/projects?search=%%' THEN
+                SPLIT_PART(SUBSTRING(properties->'$set'->>'$current_url' FROM 'search=([^&]+)'), '=', 2)
+            ELSE NULL
+        END AS project_search_value,
+        -- For Member Search, extract the value after 'search='
+        CASE
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/members?search=%%' THEN
+                SPLIT_PART(SUBSTRING(properties->'$set'->>'$current_url' FROM 'search=([^&]+)'), '=', 2)
+            ELSE NULL
+        END AS member_search_value,
+        -- For Team Search, extract the value after 'search='
+        CASE
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/teams?search=%%' THEN
+                SPLIT_PART(SUBSTRING(properties->'$set'->>'$current_url' FROM 'search=([^&]+)'), '=', 2)
+            ELSE NULL
+        END AS team_search_value
     FROM public.posthogevents
+    -- Join the members table based on the extracted member UID from the URL
+    LEFT JOIN public."Member" m ON properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/members/%%' AND m.uid = SPLIT_PART(properties->'$set'->>'$current_url', '/', 5)
+    -- Join the projects table based on the extracted project UID from the URL
+    LEFT JOIN public."Project" p ON properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/projects/%%' AND p.uid = SPLIT_PART(properties->'$set'->>'$current_url', '/', 5)
+    -- Join the teams table based on the extracted team UID from the URL
+    LEFT JOIN public."Team" t ON properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/teams/%%' AND t.uid = SPLIT_PART(properties->'$set'->>'$current_url', '/', 5)
     WHERE properties->'$set'->>'$current_url' IS NOT NULL
     """
 
@@ -2236,23 +2274,42 @@ def fetch_data_from_db(engine, selected_year, selected_month):
         query += f" AND EXTRACT(MONTH FROM timestamp) = {selected_month_num}"
 
     query += """
-    GROUP BY page_type, current_url
+    GROUP BY page_type, entity_name, project_search_value, member_search_value, team_search_value
     ORDER BY page_type, event_count DESC;
     """
+    
+    # Execute the query and return the results as a DataFrame
     return pd.read_sql(query, engine)
 
 def create_bar_chart(data, selected_page_type):
+    # Filter the data by the selected page type
     filtered_data = data[data['page_type'] == selected_page_type]
     
+    # Create a new column combining entity name and search value to make the chart more informative
+    # This helps to show a more meaningful label on the x-axis (e.g., member name or project name)
+    if selected_page_type == 'Member Search':
+        filtered_data['display_label'] = filtered_data['member_search_value'].fillna('No Search')
+    elif selected_page_type == 'Project Search':
+        filtered_data['display_label'] = filtered_data['project_search_value'].fillna('No Search')
+    elif selected_page_type == 'Team Search':
+        filtered_data['display_label'] = filtered_data['team_search_value'].fillna('No Search')
+    else:
+        # For details (non-search types), just use the entity name
+        filtered_data['display_label'] = filtered_data['entity_name']
+
+    # Create a bar chart using Plotly
     fig = px.bar(
         filtered_data,
-        x='current_url',
+        x='display_label',  # Use the new label for x-axis
         y='event_count',
-        # title=f'Event Count for {selected_page_type}',
-        labels={'current_url': 'URL', 'event_count': 'Event Count', 'page_type': 'Page Type'},
-        # color='page_type'
+        title=f'Event Count for {selected_page_type}',
+        labels={'display_label': 'Entity Name / Search Term', 'event_count': 'Event Count', 'page_type': 'Page Type'},
+        color='display_label',  # Optional: add color based on entity/search value for distinction
+        category_orders={'display_label': filtered_data['display_label'].unique().tolist()},  # To order by label
+        text='event_count',  # Show event count on bars
     )
     
+    # Display the chart in the Streamlit app
     st.plotly_chart(fig)
 
 def fetch_data_network_growth(engine, table_name):
@@ -2340,6 +2397,7 @@ def plot_mom_analysis(df, title):
     # Show the plot in Streamlit
     st.plotly_chart(fig)
 
+
 def fetch_search_event_data(engine, event_name, selected_year, selected_month):
     query = f"""
     SELECT 
@@ -2348,28 +2406,40 @@ def fetch_search_event_data(engine, event_name, selected_year, selected_month):
             properties->'user'->>'email'
         ) AS email,
         COALESCE(
-            NULLIF(properties->>'loggedInUserName', ''),  -- Treat empty strings as NULL
+            NULLIF(properties->>'loggedInUserName', ''),  
             NULLIF(properties->'user'->>'name', ''), 
-            'Untracked User'  -- Default value if name is missing or empty
+            'Guest User'  
         ) AS name,
         COUNT(*) AS event_count
+    """
+    
+    # Add the conditional search value based on the event_name
+    if event_name == 'projects_search':
+        query += ", COALESCE(properties->>'search', properties->>'name') AS search_value"
+    elif event_name == 'team_search':
+        query += ", properties->>'value' AS search_value"
+    elif event_name == 'member-list-search-clicked':
+        query += ", properties->>'searchValue' AS search_value"
+    elif event_name == 'project_search':
+        query += ", COALESCE(properties->>'searchQuery', properties->>'searchTerm') AS search_value"
+    else:
+        query += ", NULL AS search_value"  # Default case if event_name doesn't match any
+
+    query += f"""
     FROM posthogevents
     WHERE "event" = '{event_name}' 
     AND (
-        -- Exclude the specific users by name (whether logged-in or logged-out)
         (
             COALESCE(
                 properties->>'loggedInUserName', 
                 properties->'user'->>'name'
             ) NOT IN ('La Christa Eccles', 'Winston Manuel Vijay A', 'Abarna Visvanathan', 'Winston Manuel Vijay')
         )
-        -- Include logged-out users (where loggedInUserName or user->name is NULL)
         OR 
         (properties->>'loggedInUserName' IS NULL AND properties->'user'->>'name' IS NULL)
     )
     """
 
-    # Apply year and month filters
     if selected_year != "All":
         query += f" AND EXTRACT(YEAR FROM timestamp) = {selected_year}"
 
@@ -2378,10 +2448,12 @@ def fetch_search_event_data(engine, event_name, selected_year, selected_month):
         query += f" AND EXTRACT(MONTH FROM timestamp) = {month_number}"
 
     query += """
-    GROUP BY email, name
+    GROUP BY email, name, search_value
     ORDER BY event_count DESC
     LIMIT 10;
     """
+    
+    # Replace with your actual database engine
     return pd.read_sql(query, engine)
 
 
@@ -2426,7 +2498,7 @@ def fetch_data_by_contact_event(selected_type, selected_year, selected_month):
         COALESCE(
             NULLIF(TRIM(properties->>'loggedInUserName'), ''),  -- Treat empty strings as NULL and trim whitespace
             NULLIF(TRIM(properties->'user'->>'name'), ''), 
-            'Untracked User'  -- Default value if name is missing or empty
+            'Guest User'  -- Default value if name is missing or empty
         ) AS name,
         COALESCE(properties->>'type', 'Unknown') AS type,
         COUNT(*) AS event_count
@@ -2479,7 +2551,7 @@ def main():
             "Network Density",
             "IRL Gatherings",
             "Network Growth",
-            "Hackathons",
+            # "Hackathons",
             "Search Usage"
         ]
     )
@@ -2855,7 +2927,7 @@ def main():
         st.markdown(
             f"""
             <div style="background-color:#FFD700; padding:20px; border-radius:8px; text-align:center;">
-                <h3>Average Member Session Duration</h3>
+                <h3>Average Session Duration</h3>
                 <p style="font-size:28px; font-weight:bold; color:#2b2b2b;">{avg_minutes} min {avg_seconds} sec</p>
             </div>
             """,
@@ -2899,6 +2971,8 @@ def main():
             df = df[df['month'] == month_number]
 
         st.subheader("Monthly Active Users")
+
+        st.markdown("Active users are those who have engaged in more than one activity during their login session.")
         df['formatted_month'] = df['month_year'].dt.strftime('%b %Y')  # Format X-axis labels
 
         fig_active_users = px.bar(
@@ -2912,15 +2986,19 @@ def main():
         st.plotly_chart(fig_active_users)
 
         st.subheader("MoM Active User Growth Analysis")
-        fig_mom_growth = px.line(
-            df,
-            x='formatted_month',
-            y='mom_growth',
-            # title="MoM Growth Analysis",
-            labels={'formatted_month': 'Month-Year', 'mom_growth': 'MoM Growth (%)', 'active_user_count': 'Active User Count'},
-            markers=True
-        )
-        st.plotly_chart(fig_mom_growth)
+        # fig_mom_growth = px.area(
+        #     df,
+        #     x='month_year',  # X-axis: Month-Year   
+        #     y='mom_growth',  # Y-axis: MoM Growth
+        #     title="MoM Growth Analysis",  # Title of the chart
+        #     labels={'month_year': 'Month-Year', 'mom_growth': 'MoM Growth (%)'},
+        #     markers=True
+        # )
+        fig = px.area(df, x="formatted_month", y="active_user_count", 
+              title="MOM Analysis: User Count", 
+              labels={'formatted_month': 'Month-Year', 'active_user_count': 'Active User Count'},)
+        st.plotly_chart(fig)
+        # st.plotly_chart(fig_mom_growth)
 
         st.subheader("Page Type Analytics")
 
@@ -3060,6 +3138,7 @@ def main():
 
         # Plot the graph
         st.subheader("Events by Month")
+        st.markdown("Monthly event distribution by geography")
         fig = plot_events_by_month(df)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -3092,7 +3171,8 @@ def main():
         # fig = plot_events_by_month_by_user(df)
         # st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("User / Team by Month")
+        st.subheader("Monthly Event Engagement analysis")
+        st.markdown("User/Team monthly event  attendance")
         selected_data_type = st.radio("Select Type", ("User", "Team"))
 
         if selected_data_type == "User Count":
@@ -3149,41 +3229,25 @@ def main():
         st.plotly_chart(fig)
 
         visualize_event_topic_distribution(get_database_connection(), selected_year, selected_month)
+        st.subheader("Attendees Breakdown by Topic / Skill")
+        st.markdown("Distribution of event attendees by Topic / Skill")
 
-        st.subheader("Top 10 Distribution of Attendees by Topic")
-        # option = st.radio(
-        #     "Select an option:",
-        #     ["Bar Chart: Attendee Distribution", "Pie Chart: Attendee Percentage"]
-        # )
-        
-        # Create database connection
-        engine = get_database_connection()
-        
-        # if option == "Bar Chart: Attendee Distribution":
-        #     visualize_attendees_by_topic(engine, selected_year, selected_month)
-        # elif option == "Pie Chart: Attendee Percentage":
-        visualize_attendee_percentage_by_topic(engine, selected_year, selected_month)
+        option = st.radio(
+            "Select Type:",
+            ('Topic', 'Skill')
+        )
 
-        st.subheader("Top 10 Distribution of Attendees by Skill")
-        # option = st.radio(
-        #     "Select an option:",
-        #     ["Bar Chart: Attendee Distribution by Skill", "Pie Chart: Attendee Percentage by Skill"]
-        # )
-
-        # Create database connection
-        engine = get_database_connection()
-
-        # Display the corresponding chart based on the option selected
-        # if option == "Bar Chart: Attendee Distribution by Skill":
-        #     # st.subheader("Distribution of Attendees by Skill")
-        visualize_attendees_by_skill(engine, selected_year, selected_month)
-        # elif option == "Pie Chart: Attendee Percentage by Skill":
-        # visualize_attendee_percentage_by_skill(engine, selected_year, selected_month)
-
+        # Depending on the selected option, display the corresponding graph
+        if option == 'Topic':
+            visualize_attendees_by_topic(engine, selected_year, selected_month)
+        elif option == 'Skill':
+            visualize_attendees_by_skill(engine, selected_year, selected_month)
+    
         df = fetch_hosting_teams_by_focus_area(engine, selected_year, selected_month)
 
         # Plot the graph for hosting teams by focus area
-        st.subheader("No. of Hosting Teams by Focus Area")
+        st.subheader("Focus area segmentation of Hosting Teams")
+        st.markdown("Distribution of Hosting Teams by focus areas")
         fig = plot_hosting_teams_by_focus_area(df)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -3191,6 +3255,7 @@ def main():
 
         # Plotting the distribution of hosts and speakers
         st.subheader("Distribution of Hosts and Speakers by Month")
+        st.markdown("Distribution of Speakers and Hosting teams/members by month")
         fig = plot_hosts_and_speakers_distribution(df)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -3310,14 +3375,14 @@ def main():
         selected_month = st.selectbox("Select Month", ["All"] + months, index=0)
         event_name_mapping = {
             'Project':'projects-search',
-            'IRL':'irl-search-event-clicked',
+            'IRL':'irl-guest-list-search',
             'Member':'member-list-search-clicked',
             'Team':'team-search'
         }
 
         # Streamlit selectbox for selecting event type
         event_type = st.selectbox(
-            'Select Event Type',
+            'Select Page Type',
             ['Project', 'IRL', 'Member', 'Team']
         )
 
@@ -3340,6 +3405,23 @@ def main():
 
         # Display the Plotly chart for user-level data
         st.plotly_chart(fig)
+
+        with st.expander("Overall Data"):
+            df_modified = df_event.copy()
+
+            df_modified.columns = df_modified.columns.str.lower().str.replace(' ', '_')
+
+            if 'id' in df_modified.columns:
+                df_modified = df_modified.drop(columns=['id'])
+            if 'timestamp' in df_modified.columns:
+                df_modified['date'] = df_modified['timestamp'].dt.date 
+
+            columns_to_drop = ['month', 'day', 'year', 'week_of_month', 'week_start_date', 'week_end_date', 'week_range', 
+                            'user_status', 'month-week', 'timestamp', 'clicks', 'month_name','week_start', 'week_end', 'user_label' ]
+
+            df_modified = df_modified.drop(columns=[col for col in columns_to_drop if col in df_modified.columns])
+            df_modified.columns = df_modified.columns.str.replace('_', ' ').str.title().str.replace(' ', ' ')
+            st.dataframe(df_modified, use_container_width=True)
 
         # Fetch monthly event data based on selected event type, year, and month
         df_event_monthly = fetch_search_event_data_by_month(engine, selected_event_name, selected_year, selected_month)
