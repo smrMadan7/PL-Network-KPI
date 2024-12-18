@@ -1983,7 +1983,6 @@ def plot_hosts_and_speakers_distribution(dataframe):
 
     return fig
 
-
 def fetch_active_users(engine):
     query = """
         SELECT
@@ -2112,56 +2111,131 @@ def fetch_events_by_month(engine, selected_year, selected_month):
     return pd.read_sql(query, engine)
 
 # Function to plot the events by page type
-def plot_events_by_page_type(df):
-    # Plot a bar chart
-    fig = px.bar(
-        df, 
-        x="page_type", 
-        y="event_count", 
-        # title="Event Count by Page Type",
-        labels={"page_type": "Page Type", "event_count": "Event Count"},
-        color="page_type",  # Color by page_type
-        hover_data={"page_type": True, "event_count": True}
-    )
+# def plot_events_by_page_type(df):
+#     # Plot a bar chart
+#     fig = px.bar(
+#         df, 
+#         x="page_type", 
+#         y="event_count", 
+#         # title="Event Count by Page Type",
+#         labels={"page_type": "Page Type", "event_count": "Event Count"},
+#         color="page_type",  # Color by page_type
+#         hover_data={"page_type": True, "event_count": True}
+#     )
 
-    # Customize the layout
-    fig.update_layout(
-        xaxis_title="Page Type",
-        yaxis_title="Number of Events",
-        showlegend=False
-    )
+#     # Customize the layout
+#     fig.update_layout(
+#         xaxis_title="Page Type",
+#         yaxis_title="Number of Events",
+#         showlegend=False
+#     )
 
-    return fig
+#     return fig
 
 import psycopg2
 
+# def fetch_data_from_db_pagetype(engine, selected_year, selected_month):
+#     # Define the query
+#     query = """
+#     SELECT
+#         CASE
+#             WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/members'
+#             THEN 'Member Landing Page'
+#             WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/projects'
+#             THEN 'Project Landing Page'
+#             WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/irl'
+#             THEN 'IRL Landing Page'
+#             WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/teams'
+#             THEN 'Team Landing Page'
+#             WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/members%%' 
+#             THEN 'Member Details Page'
+#             WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/projects%%' 
+#             THEN 'Project Details Page'
+#             WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/teams%%' 
+#             THEN 'Team Details Page'
+#             WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/irl%%' 
+#             THEN 'IRL Details Page'
+#             ELSE 'Other'
+#         END AS page_type,
+#         EXTRACT(MONTH FROM timestamp) AS month,
+#         COUNT(*) AS event_count
+#     FROM public.posthogevents
+#     WHERE properties->'$set'->>'$current_url' IS NOT NULL
+#     """
+
+#     # Convert selected_month to its numeric value
+#     selected_month_num = month_mapping.get(selected_month, None)
+
+#     # Apply filters based on the selected year and month
+#     if selected_year != "All":
+#         query += f" AND EXTRACT(YEAR FROM timestamp) = {selected_year}"
+    
+#     if selected_month != "All":
+#         query += f" AND EXTRACT(MONTH FROM timestamp) = {selected_month_num}"
+
+#     query += """
+#     GROUP BY page_type, month
+#     ORDER BY month, page_type;
+#     """
+
+#     # Execute the query and load the result into a DataFrame
+#     return pd.read_sql(query, engine)
+
 def fetch_data_from_db_pagetype(engine, selected_year, selected_month):
-    # Define the query
+    # SQL query to fetch data for active users by page type
     query = """
-    SELECT
+    WITH active_users AS (
+        SELECT
+            EXTRACT(YEAR FROM timestamp) AS year,
+            EXTRACT(MONTH FROM timestamp) AS month,
+            COUNT(
+                DISTINCT COALESCE(
+                    properties->>'userName',
+                    properties->>'loggedInUserName',
+                    properties->'user'->>'name'
+                )
+            ) AS active_user_count,
+            -- Capture the active user's session ID for further reference
+            properties->>'$session_id' AS session_id,
+            COALESCE(
+                properties->>'userName',
+                properties->>'loggedInUserName',
+                properties->'user'->>'name'
+            ) AS user_name
+        FROM 
+            public.posthogevents
+        WHERE
+            properties->>'$session_id' IS NOT NULL
+        GROUP BY 
+            year, month, session_id, user_name
+        HAVING 
+            COUNT(*) > 1
+    )
+    SELECT 
+        au.year,
+        au.month,
+        -- Determine the page type based on the URL
         CASE
-            WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/members'
-            THEN 'Member Landing Page'
-            WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/projects'
-            THEN 'Project Landing Page'
-            WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/irl'
-            THEN 'IRL Landing Page'
-            WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/teams'
-            THEN 'Team Landing Page'
-            WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/members%%' 
-            THEN 'Member Details Page'
-            WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/projects%%' 
-            THEN 'Project Details Page'
-            WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/teams%%' 
-            THEN 'Team Details Page'
-            WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/irl%%' 
-            THEN 'IRL Details Page'
+            WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/members' THEN 'Member Landing Page'
+            WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/projects' THEN 'Project Landing Page'
+            WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/irl' THEN 'IRL Landing Page'
+            WHEN properties->'$set'->>'$current_url' = 'https://directory.plnetwork.io/teams' THEN 'Team Landing Page'
+            WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/members%%' THEN 'Member Details Page'
+            WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/projects%%' THEN 'Project Details Page'
+            WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/teams%%' THEN 'Team Details Page'
+            WHEN properties->'$set'->>'$current_url' LIKE 'https://directory.plnetwork.io/irl%%' THEN 'IRL Details Page'
             ELSE 'Other'
         END AS page_type,
-        EXTRACT(MONTH FROM timestamp) AS month,
-        COUNT(*) AS event_count
-    FROM public.posthogevents
-    WHERE properties->'$set'->>'$current_url' IS NOT NULL
+        -- Count the active users per page type for each month
+        COUNT(DISTINCT au.user_name) AS active_user_count
+    FROM 
+        public.posthogevents AS properties
+    JOIN 
+        active_users AS au
+        ON COALESCE(properties->>'userName', properties->>'loggedInUserName', properties->'user'->>'name') = au.user_name
+        AND EXTRACT(YEAR FROM properties.timestamp) = au.year
+        AND EXTRACT(MONTH FROM properties.timestamp) = au.month
+        AND properties->>'$session_id' = au.session_id
     """
 
     # Convert selected_month to its numeric value
@@ -2175,32 +2249,120 @@ def fetch_data_from_db_pagetype(engine, selected_year, selected_month):
         query += f" AND EXTRACT(MONTH FROM timestamp) = {selected_month_num}"
 
     query += """
-    GROUP BY page_type, month
-    ORDER BY month, page_type;
+    GROUP BY 
+        au.year, au.month, page_type
+    ORDER BY 
+        au.year, au.month, page_type;
     """
 
     # Execute the query and load the result into a DataFrame
     return pd.read_sql(query, engine)
 
 
+# def plot_events_by_page_type(df):
+#     # Plot a bar chart with page_type as the legend
+#     fig = px.bar(
+#         df, 
+#         x="month", 
+#         y="event_count", 
+#         color="page_type",  # Color by page_type
+#         labels={"month": "Month", "event_count": "Event Count", "page_type": "Page Type"},
+#         barmode="group",  # Group bars by month
+#         hover_data={"page_type": True, "event_count": True, "month": True}
+#     )
+
+#     # Customize the layout
+#     fig.update_layout(
+#         xaxis_title="Month",
+#         yaxis_title="Number of Events",
+#         showlegend=True,
+#         title="Event Count by Page Type for Each Month"
+#     )
+
+#     # Update the x-axis to display month names instead of numbers
+#     fig.update_xaxes(
+#         tickmode='array',
+#         tickvals=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+#         ticktext=["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+#     )
+
+#     return fig
+
+# def plot_events_by_page_type(df):
+#     fig = px.bar(
+#         df, 
+#         x="month", 
+#         y="event_count", 
+#         color="page_type",  # Stack bars by page_type
+#         labels={"month": "Month", "event_count": "Event Count", "page_type": "Page Type"},
+#         barmode="stack",  # Set to "stack" to stack bars by page_type
+#         hover_data={"page_type": True, "event_count": True, "month": True}
+#     )
+
+#     # Customize the layout
+#     fig.update_layout(
+#         xaxis_title="Month",
+#         yaxis_title="Number of Events",
+#         showlegend=True,
+#         title="Event Count by Page Type for Each Month"
+#     )
+
+#     # Update the x-axis to display month names instead of numbers
+#     fig.update_xaxes(
+#         tickmode='array',
+#         tickvals=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+#         ticktext=["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+#     )
+
+#     return fig
+
 def plot_events_by_page_type(df):
-    # Plot a bar chart with page_type as the legend
+    # Create a stacked bar chart using Plotly
     fig = px.bar(
         df, 
         x="month", 
-        y="event_count", 
-        color="page_type",  # Color by page_type
-        labels={"month": "Month", "event_count": "Event Count", "page_type": "Page Type"},
-        barmode="group",  # Group bars by month
-        hover_data={"page_type": True, "event_count": True, "month": True}
+        y="active_user_count",  # Use active_user_count for the height of bars
+        color="page_type",      # Stack bars by page_type
+        labels={"month": "Month", "active_user_count": "Active Users", "page_type": "Page Type"},
+        barmode="stack",        # Stack bars by page type
+        hover_data={"page_type": True, "active_user_count": True, "month": True}
     )
 
     # Customize the layout
     fig.update_layout(
         xaxis_title="Month",
-        yaxis_title="Number of Events",
+        yaxis_title="Active User",
         showlegend=True,
-        title="Event Count by Page Type for Each Month"
+        # title="Active Users by Page Type for Each Month"
+    )
+
+    # Update the x-axis to display month names instead of numbers
+    fig.update_xaxes(
+        tickmode='array',
+        tickvals=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        ticktext=["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    )
+
+    return fig
+
+def plot_events_by_page_type_1(df):
+    # Create a stacked bar chart using Plotly
+    fig = px.bar(
+        df, 
+        x="month", 
+        y="active_user_count",  # Use active_user_count for the height of bars
+        color="page_type",      # Stack bars by page_type
+        labels={"month": "Month", "active_user_count": "Active Users", "page_type": "Page Type"},
+        barmode="stack",        # Stack bars by page type
+        hover_data={"page_type": True, "active_user_count": True, "month": True}
+    )
+
+    # Customize the layout
+    fig.update_layout(
+        xaxis_title="Month",
+        yaxis_title="Active User",
+        showlegend=True,
+        # title="Active Users by Page Type for Each Month"
     )
 
     # Update the x-axis to display month names instead of numbers
@@ -2218,11 +2380,11 @@ def fetch_data_from_db(engine, selected_year, selected_month):
     SELECT
         CASE
             WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/members/%%' THEN 'Member Detail'
-            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/members?search%%' THEN 'Member Search'
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/members?searchBy%%' THEN 'Member Search'
             WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/projects/%%' THEN 'Project Detail'
-            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/projects?search%%' THEN 'Project Search'
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/projects?searchBy%%' THEN 'Project Search'
             WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/teams/%%' THEN 'Team Detail'
-            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/teams?search%%' THEN 'Team Search'
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/teams?searchBy%%' THEN 'Team Search'
             WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/irl/%%' THEN 'IRL Detail'
             WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/irl?search%%' THEN 'IRL Search'
             ELSE 'Other'
@@ -2235,24 +2397,30 @@ def fetch_data_from_db(engine, selected_year, selected_month):
             WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/teams/%%' THEN t.name
             ELSE NULL
         END AS entity_name,
-        -- For Project Search, extract the value after 'search='
+        -- For Project Search, extract the value after 'searchBy'
         CASE
-            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/projects?search=%%' THEN
-                SPLIT_PART(SUBSTRING(properties->'$set'->>'$current_url' FROM 'search=([^&]+)'), '=', 2)
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/projects?searchBy=%%' THEN
+                SUBSTRING(properties->'$set'->>'$current_url' FROM 'searchBy=([^&]+)')
             ELSE NULL
         END AS project_search_value,
-        -- For Member Search, extract the value after 'search='
+        -- For Member Search, extract the value after 'searchBy'
         CASE
-            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/members?search=%%' THEN
-                SPLIT_PART(SUBSTRING(properties->'$set'->>'$current_url' FROM 'search=([^&]+)'), '=', 2)
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/members?searchBy=%%' THEN
+                SUBSTRING(properties->'$set'->>'$current_url' FROM 'searchBy=([^&]+)')
             ELSE NULL
         END AS member_search_value,
-        -- For Team Search, extract the value after 'search='
+        -- For Team Search, extract the value after 'searchBy'
         CASE
-            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/teams?search=%%' THEN
-                SPLIT_PART(SUBSTRING(properties->'$set'->>'$current_url' FROM 'search=([^&]+)'), '=', 2)
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/teams?searchBy=%%' THEN
+                SUBSTRING(properties->'$set'->>'$current_url' FROM 'searchBy=([^&]+)')
             ELSE NULL
-        END AS team_search_value
+        END AS team_search_value,
+        -- For IRL Search, extract the value after 'search'
+        CASE
+            WHEN properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/irl?search=%%' THEN
+                SUBSTRING(properties->'$set'->>'$current_url' FROM 'search=([^&]+)')
+            ELSE NULL
+        END AS irl_search_value
     FROM public.posthogevents
     -- Join the members table based on the extracted member UID from the URL
     LEFT JOIN public."Member" m ON properties->'$set'->>'$current_url' LIKE '%%https://directory.plnetwork.io/members/%%' AND m.uid = SPLIT_PART(properties->'$set'->>'$current_url', '/', 5)
@@ -2274,7 +2442,7 @@ def fetch_data_from_db(engine, selected_year, selected_month):
         query += f" AND EXTRACT(MONTH FROM timestamp) = {selected_month_num}"
 
     query += """
-    GROUP BY page_type, entity_name, project_search_value, member_search_value, team_search_value
+    GROUP BY page_type, entity_name, project_search_value, member_search_value, team_search_value, irl_search_value
     ORDER BY page_type, event_count DESC;
     """
     
@@ -2293,6 +2461,8 @@ def create_bar_chart(data, selected_page_type):
         filtered_data['display_label'] = filtered_data['project_search_value'].fillna('No Search')
     elif selected_page_type == 'Team Search':
         filtered_data['display_label'] = filtered_data['team_search_value'].fillna('No Search')
+    elif selected_page_type == 'IRL Search':
+        filtered_data['display_label'] = filtered_data['irl_search_value'].fillna('No Search')
     else:
         # For details (non-search types), just use the entity name
         filtered_data['display_label'] = filtered_data['entity_name']
@@ -2302,8 +2472,8 @@ def create_bar_chart(data, selected_page_type):
         filtered_data,
         x='display_label',  # Use the new label for x-axis
         y='event_count',
-        title=f'Event Count for {selected_page_type}',
-        labels={'display_label': 'Entity Name / Search Term', 'event_count': 'Event Count', 'page_type': 'Page Type'},
+        # title=f'Event Count for {selected_page_type}',
+        labels={'display_label': 'Entity Name / Search Term', 'event_count': 'Count', 'page_type': 'Page Type'},
         color='display_label',  # Optional: add color based on entity/search value for distinction
         category_orders={'display_label': filtered_data['display_label'].unique().tolist()},  # To order by label
         text='event_count',  # Show event count on bars
@@ -2914,7 +3084,7 @@ def main():
             st.error("The CSV file is missing some required columns. Please ensure the file contains 'Response Category', 'Count', and 'Percentage' columns.")
 
     elif page == "Directory MAUs":
-        st.title("Active User Analysis")
+        st.title("Directory MAUs")
 
         df = fetch_average_session_time(engine)
         avg_minutes = int(df['average_duration_minutes'][0])
@@ -2960,32 +3130,79 @@ def main():
         selected_year = st.selectbox("Select Year", years, index=0, key="year_selectbox")
         selected_month = st.selectbox("Select Month", ["All"] + months, index=0,  key="month_selectbox")
 
-        df = fetch_active_users(engine)
-        df = calculate_mom_growth(df)
+        st.subheader("Active Users Analysis")
 
+        tab = st.radio("Select Visualization", ["Monthly Active Users", "Page Type Analytics"])
+
+        active_df = fetch_active_users(engine)
+        # df = calculate_mom_growth(df)
+        
         if selected_year != "All":
-            df = df[df['year'] == int(selected_year)]
+            active_df = active_df[active_df['year'] == int(selected_year)]
 
         if selected_month != "All":
             month_number = month_mapping[selected_month]
-            df = df[df['month'] == month_number]
+            active_df = active_df[active_df['month'] == month_number]
 
-        st.subheader("Monthly Active Users")
+        if tab == "Monthly Active Users":
+            st.subheader("Monthly Active Users")
 
-        st.markdown("Active users are those who have engaged in more than one activity during their login session.")
+            # Load the data (Assuming you have a 'df' dataframe already)
+            # df['formatted_month'] = df['month_year'].dt.strftime('%b %Y')  # Format X-axis labels
+            st.markdown("Active users those who have engaged in more than one activity during their login session")
+            active_df['month_year'] = pd.to_datetime(active_df[['year', 'month']].assign(day=1))
+            active_df = active_df.sort_values(by='month_year')
+            
+            # Example DataFrame (replace this with your actual data fetching logic)
+            active_df['formatted_month'] = active_df['month_year'].dt.strftime('%b %Y')  # Format X-axis labels
+
+            # Create the bar chart for Monthly Active Users
+            fig_active_users = px.bar(
+                active_df,
+                x='formatted_month',
+                y='active_user_count',
+                labels={'formatted_month': 'Month-Year', 'active_user_count': 'Active Users'},
+                text_auto=True
+            )
+            
+            # Plot the chart
+            st.plotly_chart(fig_active_users)
+
+        elif tab == "Page Type Analytics":
+            st.subheader("Page Type Analytics (Active Users)")
+            st.markdown("Analysis of active users breakdown on page type by monthly basis")
+
+            # Fetch the data from the database
+            df = fetch_data_from_db_pagetype(engine, selected_year, selected_month)
+
+            # Create the stacked bar chart
+            fig_page_type = plot_events_by_page_type(df)
+
+            # Display the chart
+            st.plotly_chart(fig_page_type, use_container_width=True, key="bar_chart_1")
+
+        # st.markdown("Active users are those who have engaged in more than one activity during their login session.")
+        # df['formatted_month'] = df['month_year'].dt.strftime('%b %Y')  # Format X-axis labels
+
+        # fig_active_users = px.bar(
+        #     df,
+        #     x='formatted_month',
+        #     y='active_user_count',
+        #     # title="Monthly Active User Count",
+        #     labels={'formatted_month': 'Month-Year', 'active_user_count': 'Active User Count'},
+        #     text_auto=True
+        # )
+        # st.plotly_chart(fig_active_users)
+
+        df = calculate_mom_growth(active_df)
+
+        df['month_year'] = pd.to_datetime(df[['year', 'month']].assign(day=1))
+        df = df.sort_values(by='month_year')
+        
+        # Example DataFrame (replace this with your actual data fetching logic)
         df['formatted_month'] = df['month_year'].dt.strftime('%b %Y')  # Format X-axis labels
 
-        fig_active_users = px.bar(
-            df,
-            x='formatted_month',
-            y='active_user_count',
-            # title="Monthly Active User Count",
-            labels={'formatted_month': 'Month-Year', 'active_user_count': 'Active User Count'},
-            text_auto=True
-        )
-        st.plotly_chart(fig_active_users)
-
-        st.subheader("MoM Active User Growth Analysis")
+        st.subheader("MoM Active Users Growth Analysis")
         # fig_mom_growth = px.area(
         #     df,
         #     x='month_year',  # X-axis: Month-Year   
@@ -2994,28 +3211,31 @@ def main():
         #     labels={'month_year': 'Month-Year', 'mom_growth': 'MoM Growth (%)'},
         #     markers=True
         # )
+        st.markdown("Month on Month Growth Analysis of Active Users")
         fig = px.area(df, x="formatted_month", y="active_user_count", 
-              title="MOM Analysis: User Count", 
-              labels={'formatted_month': 'Month-Year', 'active_user_count': 'Active User Count'},)
+            #   title="MOM Analysis: User Count", 
+              labels={'formatted_month': 'Month-Year', 'active_user_count': 'Active Users'},)
         st.plotly_chart(fig)
         # st.plotly_chart(fig_mom_growth)
 
-        st.subheader("Page Type Analytics")
-
+        st.subheader("Page Type Analytics (COMPLETE)")
+        st.markdown("Complete (2024) analysis of page type on a monthly basis")
         df = fetch_data_from_db_pagetype(engine, selected_year, selected_month)
 
-        fig = plot_events_by_page_type(df)
-        st.plotly_chart(fig, use_container_width=True)
+        fig = plot_events_by_page_type_1(df)
+        st.plotly_chart(fig, use_container_width=True, key="bar_chart_2")
+
+        st.subheader("Page-Wise Analytics")
+        st.markdown("Page-level analytics breakdown")
 
         df = fetch_data_from_db(engine, selected_year, selected_month)
 
-        st.subheader("Page Path Analytics")
-
         page_type = st.selectbox(
-            'Page Type',
-            df['page_type'].unique()
+            'Select Page Type',
+            df[df['page_type'].isin(['IRL Detail', 'Other']) == False]['page_type'].unique()
         )
 
+        # Filter the dataframe based on the selected page_type and sort by event_count
         top_10_df = (
             df[df['page_type'] == page_type]
             .sort_values(by='event_count', ascending=False)
