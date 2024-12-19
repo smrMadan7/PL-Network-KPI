@@ -2568,7 +2568,7 @@ def plot_mom_analysis(df, title):
     st.plotly_chart(fig)
 
 
-def fetch_search_event_data(engine, event_name, selected_year, selected_month):
+def fetch_search_event_data(engine, event_name, selected_year, selected_month, user_status):
     query = f"""
     SELECT 
         COALESCE(
@@ -2578,22 +2578,25 @@ def fetch_search_event_data(engine, event_name, selected_year, selected_month):
         COALESCE(
             NULLIF(properties->>'loggedInUserName', ''),  
             NULLIF(properties->'user'->>'name', ''), 
+            NULLIF(properties->>'userName', ''), 
             'Guest User'  
         ) AS name,
-        COUNT(*) AS event_count
+        COUNT(*) AS event_count,
+        COALESCE(
+            CASE
+                WHEN properties->>'loggedInUserEmail' IS NOT NULL AND properties->>'loggedInUserEmail' != '' THEN 'Logged-In'
+                ELSE 'Logged-Out'
+            END, 'Logged-Out'
+        ) AS user_status,
+        -- Ensure search_value is selected for the specific event
+        CASE
+            WHEN '{event_name}' = 'projects-search' THEN COALESCE(properties->>'search', properties->>'name')
+            WHEN '{event_name}' = 'team-search' THEN properties->>'value'
+            WHEN '{event_name}' = 'member-list-search-clicked' THEN properties->>'searchValue'
+            WHEN '{event_name}' = 'irl-guest-list-search' THEN COALESCE(properties->>'searchQuery', properties->>'searchTerm')
+            ELSE NULL
+        END AS search_value
     """
-    
-    # Add the conditional search value based on the event_name
-    if event_name == 'projects_search':
-        query += ", COALESCE(properties->>'search', properties->>'name') AS search_value"
-    elif event_name == 'team_search':
-        query += ", properties->>'value' AS search_value"
-    elif event_name == 'member-list-search-clicked':
-        query += ", properties->>'searchValue' AS search_value"
-    elif event_name == 'project_search':
-        query += ", COALESCE(properties->>'searchQuery', properties->>'searchTerm') AS search_value"
-    else:
-        query += ", NULL AS search_value"  # Default case if event_name doesn't match any
 
     query += f"""
     FROM posthogevents
@@ -2601,12 +2604,13 @@ def fetch_search_event_data(engine, event_name, selected_year, selected_month):
     AND (
         (
             COALESCE(
+                properties->>'userName', 
                 properties->>'loggedInUserName', 
                 properties->'user'->>'name'
             ) NOT IN ('La Christa Eccles', 'Winston Manuel Vijay A', 'Abarna Visvanathan', 'Winston Manuel Vijay')
         )
         OR 
-        (properties->>'loggedInUserName' IS NULL AND properties->'user'->>'name' IS NULL)
+        (properties->>'loggedInUserName' IS NULL AND properties->'user'->>'name' IS NULL AND  properties->>'userName' IS NULL)
     )
     """
 
@@ -2617,34 +2621,54 @@ def fetch_search_event_data(engine, event_name, selected_year, selected_month):
         month_number = month_mapping[selected_month]
         query += f" AND EXTRACT(MONTH FROM timestamp) = {month_number}"
 
+    # Apply user_status filter directly in the WHERE clause
+    if user_status != "All":
+        query += f" AND CASE WHEN properties->>'loggedInUserEmail' IS NOT NULL AND properties->>'loggedInUserEmail' != '' THEN 'Logged-In' ELSE 'Logged-Out' END = '{user_status}'"
+
     query += """
-    GROUP BY email, name, search_value
-    ORDER BY event_count DESC
-    LIMIT 10;
+    GROUP BY email, name, search_value, user_status
+    ORDER BY event_count DESC;
     """
-    
+
     # Replace with your actual database engine
     return pd.read_sql(query, engine)
 
 
-def fetch_search_event_data_by_month(engine, event_type, selected_year, selected_month):
+def fetch_search_event_data_by_month(engine, event_type, selected_year, selected_month, user_status_filter=None):
+    # Base query with a CASE statement for user status
     query = f"""
     SELECT 
-        DATE_TRUNC('month', timestamp) AS month_start,  
-        COUNT(*) AS event_count
+        DATE_TRUNC('month', timestamp) AS month_start,
+        COUNT(*) AS event_count,
+        CASE
+            WHEN COALESCE(
+                    properties->>'userName',
+                    properties->>'loggedInUserName', 
+                    properties->'user'->>'name'
+                ) IS NOT NULL 
+                AND COALESCE(
+                    properties->>'userName',
+                    properties->>'loggedInUserName', 
+                    properties->'user'->>'name'
+                ) != '' 
+            THEN 'Logged-In'
+            ELSE 'Logged-Out'
+        END AS user_status
     FROM posthogevents
     WHERE "event" = '{event_type}' 
     AND (
         -- Exclude the specific users by name (whether logged-in or logged-out)
-        (
-            COALESCE(
-                properties->>'loggedInUserName', 
-                properties->'user'->>'name'
-            ) NOT IN ('La Christa Eccles', 'Winston Manuel Vijay A', 'Abarna Visvanathan', 'Winston Manuel Vijay')
+        COALESCE(
+            properties->>'userName',
+            properties->>'loggedInUserName', 
+            properties->'user'->>'name'
+        ) NOT IN ('La Christa Eccles', 'Winston Manuel Vijay A', 'Abarna Visvanathan', 'Winston Manuel Vijay')
+        -- Include logged-out users (where all user-identifying fields are NULL)
+        OR (
+            properties->>'userName' IS NULL AND 
+            properties->>'loggedInUserName' IS NULL AND 
+            properties->'user'->>'name' IS NULL
         )
-        -- Include logged-out users (where loggedInUserName or user->name is NULL)
-        OR 
-        (properties->>'loggedInUserName' IS NULL AND properties->'user'->>'name' IS NULL)
     )
     """
 
@@ -2656,11 +2680,34 @@ def fetch_search_event_data_by_month(engine, event_type, selected_year, selected
         month_number = month_mapping[selected_month]
         query += f" AND EXTRACT(MONTH FROM timestamp) = {month_number}"
 
+    # Apply user status filter only if it's not 'All'
+    if user_status_filter and user_status_filter != "All":
+        query += f"""
+        AND (
+            CASE
+                WHEN COALESCE(
+                        properties->>'userName',
+                        properties->>'loggedInUserName', 
+                        properties->'user'->>'name'
+                    ) IS NOT NULL 
+                    AND COALESCE(
+                        properties->>'userName',
+                        properties->>'loggedInUserName', 
+                        properties->'user'->>'name'
+                    ) != '' 
+                THEN 'Logged-In'
+                ELSE 'Logged-Out'
+            END = '{user_status_filter}'
+        )
+        """
+
     query += """
-    GROUP BY month_start
+    GROUP BY month_start, user_status
     ORDER BY month_start;
     """
+
     return pd.read_sql(query, engine)
+
 
 def fetch_data_by_contact_event(selected_type, selected_year, selected_month):
     query = f"""
@@ -2671,6 +2718,7 @@ def fetch_data_by_contact_event(selected_type, selected_year, selected_month):
             'Guest User'  -- Default value if name is missing or empty
         ) AS name,
         COALESCE(properties->>'type', 'Unknown') AS type,
+        COALESCE(properties->>'name', 'Unknown') AS clicked_name,
         COUNT(*) AS event_count
     FROM posthogevents
     WHERE "event" = 'member-detail-social-link_clicked'
@@ -2702,12 +2750,107 @@ def fetch_data_by_contact_event(selected_type, selected_year, selected_month):
         query += f" AND EXTRACT(MONTH FROM timestamp) = {month_number}"
 
     query += """
-    GROUP BY name, type
-    ORDER BY event_count DESC
-    LIMIT 10;
-    """
+    GROUP BY name, type, clicked_name
+    ORDER BY event_count DESC;    """
     return query
 
+def plot_bar_chart(data, selected_year, selected_month):
+    # Filter data based on selected year and month
+    if selected_year != "All":
+        data = data[data['year'] == int(selected_year)]
+    
+    if selected_month != "All":
+        data = data[data['month'].str.split(' ').str[0] == selected_month]
+
+    # Count the number of clicks per month, per page type
+    click_counts = data.groupby(['month', 'page_type']).size().reset_index(name='click_count')
+
+    # Create a bar chart showing the number of clicks per month and page type
+    fig = px.bar(click_counts, 
+                 x='month', 
+                 y='click_count', 
+                 color='page_type',  # Color by page type (IRL Page, Team Page)
+                 labels={"click_count": "Number of Clicks", "month": "Month", "page_type": "Page Type"},
+                #  title="Team Clicks Over Time by Page Type",
+                 category_orders={"month": sorted(click_counts['month'].unique())})  # Ensure months are sorted
+
+    # Enable interactive legend and dynamic bar updates
+    fig.update_layout(
+        barmode='stack',  # Optional: Stack bars if needed
+        legend_title="Page Type",  # Legend title
+        legend=dict(
+            x=1,  # Place legend outside the chart for better view
+            y=1,
+            traceorder='normal',
+            orientation='h',
+            font=dict(size=12)
+        ),
+        showlegend=True  # Ensure legend is visible
+    )
+
+    # Add total clicks on top of the bars with an offset for visibility
+    totals = click_counts.groupby('month')['click_count'].sum().reset_index(name='total_clicks')
+    for i, row in totals.iterrows():
+        month = row['month']
+        total_clicks = row['total_clicks']
+        fig.add_annotation(
+            x=month, 
+            y=total_clicks + 10,  # Adjusted to be slightly above the bar
+            text=f"{total_clicks}", 
+            showarrow=False, 
+            font=dict(size=14, color="black"),  # Increased font size for better visibility
+            align="center"
+        )
+    
+    return fig
+
+def fetch_team_data_clicked(engine, selected_year, selected_month):
+    # Build the base query
+    query = """
+        SELECT 
+            COALESCE(properties->>'loggedInUserName', properties->'user'->>'name') AS ClickedBy,
+            COALESCE (properties->'teamName', properties->'name') as team_name,
+            TO_CHAR(timestamp, 'Month YYYY') AS month,
+            EXTRACT(YEAR FROM timestamp) AS year,
+            CASE
+                WHEN "event" = 'irl-guest-list-table-team-clicked' THEN 'IRL Page'
+                WHEN "event" = 'team-clicked' THEN 'Teams Landing Page'
+                WHEN "event" = 'memeber-detail-team-clicked' THEN 'Member Profile Page'
+                WHEN "event" = 'project-detail-maintainer-team-clicked' THEN 'Project Page'
+                ELSE 'Other'
+            END AS page_type,
+            COUNT(*) AS event_count
+        FROM posthogevents
+        WHERE 
+            (properties->>'loggedInUserEmail' IS NOT NULL OR properties->'user'->>'email' IS NOT NULL)
+            AND "event" IN ('irl-guest-list-table-team-clicked', 'team-clicked', 'memeber-detail-team-clicked', 'project-detail-maintainer-team-clicked')
+             AND (
+        -- Exclude the specific users by name (whether logged-in or logged-out)
+        (
+            COALESCE(
+                properties->>'loggedInUserName', 
+                properties->'user'->>'name'
+            ) NOT IN ('La Christa Eccles', 'Winston Manuel Vijay A', 'Abarna Visvanathan', 'Winston Manuel Vijay')
+        )
+    )
+    """
+    
+    # Add conditions for the year and month only if they are not "All"
+    if selected_year != "All":
+        query += f" AND EXTRACT(YEAR FROM timestamp) = {selected_year}"
+    
+    if selected_month != "All":
+        query += f" AND TO_CHAR(timestamp, 'Month YYYY') = '{selected_month}'"
+    
+    # Complete the query
+    query += """
+        GROUP BY 
+            ClickedBy, month, year, page_type, team_name
+        ORDER BY event_count DESC;
+    """
+    
+    # Execute the query with the parameters
+    return pd.read_sql(query, engine)
 
 def main():
     st.set_page_config(page_title="nKPI Dashboard", layout="wide")
@@ -2722,7 +2865,7 @@ def main():
             "IRL Gatherings",
             "Network Growth",
             # "Hackathons",
-            "Search Usage"
+            "Usage Activity"
         ]
     )
 
@@ -3565,8 +3708,8 @@ def main():
         dummy_image_url = "https://plabs-assets.s3.us-west-1.amazonaws.com/Coming+Soon.png"
         st.image(dummy_image_url, caption="Distribution graph of people by skills", width=900)
 
-    elif page == 'Search Usage':
-        st.title("Search Usage")
+    elif page == 'Usage Activity':
+        st.title("Usage Activity")
 
         st.subheader("Filters")
         years = ["All", "2024"] 
@@ -3598,8 +3741,9 @@ def main():
             'IRL':'irl-guest-list-search',
             'Member':'member-list-search-clicked',
             'Team':'team-search'
-        }
+        } 
 
+        st.title("Search Usage")
         # Streamlit selectbox for selecting event type
         event_type = st.selectbox(
             'Select Page Type',
@@ -3608,16 +3752,34 @@ def main():
 
         selected_event_name = event_name_mapping[event_type]
 
-        df_event = fetch_search_event_data(engine, selected_event_name, selected_year, selected_month)
+        user_status = st.selectbox(
+            'Select User Status',
+            ['All', 'Logged-In', 'Logged-Out']
+        )
 
-        # Plot the user-level event data
+        st.subheader('Top Users Engaging with Event Searches')
+        st.markdown("Shows Users who are most active in searching for events")
+        df_event = fetch_search_event_data(engine, selected_event_name, selected_year, selected_month, user_status)
+
+        # Sort the data and filter for the top 10 users based on event count
+        df_event_top_10 = df_event.sort_values(by='event_count', ascending=False).head(10)
+
+        # If you want to group by 'search_value' as well, we need to sum the event counts per 'name' and 'search_value'.
+        df_event_top_10_grouped = df_event_top_10.groupby(['name', 'search_value'], as_index=False).agg({'event_count': 'sum'})
+
+        df_event_top_10_grouped['color_group'] = df_event_top_10_grouped['search_value'].fillna('Guest User')
+
+        df_event_top_10_grouped['user_search_combined'] = df_event_top_10_grouped['name'] + ' - ' + df_event_top_10_grouped['search_value'].fillna('No Search Value')
+
+        # Create the bar graph using Plotly
         fig = px.bar(
-            df_event,
-            x='name',  # User's name
+            df_event_top_10_grouped,
+            x='user_search_combined',  # Unique combination of user and search_value
             y='event_count',  # Event count
+            # color='search_value',  # Color by search_value
             text='event_count',  # Display event count as text
-            labels={'name': 'Members', 'event_count': 'Event Count'},
-            title=f"Top 10 Users for Event: {event_type}",
+            labels={'user_search_combined': 'User - Search Value', 'event_count': 'Count', 'search_value': 'Search Value'},
+            # title=f"Top 10 Users for Event: {event_type}",
         )
 
         # Update layout to display counts above each bar
@@ -3627,46 +3789,63 @@ def main():
         st.plotly_chart(fig)
 
         with st.expander("Overall Data"):
+
+            # Handle potential missing columns in df_modified
             df_modified = df_event.copy()
 
+            # Mapping of original column names to the user-friendly versions
+            column_mapping = {
+                'name': 'Name',
+                'search_value': 'Search Value',
+                'event_count': 'Event Count'
+            }
+
+            # Convert column names to lowercase and remove any extra spaces
             df_modified.columns = df_modified.columns.str.lower().str.replace(' ', '_')
 
-            if 'id' in df_modified.columns:
-                df_modified = df_modified.drop(columns=['id'])
-            if 'timestamp' in df_modified.columns:
-                df_modified['date'] = df_modified['timestamp'].dt.date 
+            # Apply the column mapping
+            df_modified = df_modified.rename(columns=column_mapping)
 
-            columns_to_drop = ['month', 'day', 'year', 'week_of_month', 'week_start_date', 'week_end_date', 'week_range', 
-                            'user_status', 'month-week', 'timestamp', 'clicks', 'month_name','week_start', 'week_end', 'user_label' ]
+            # Check if 'Search Value' exists before referencing it
+            if 'Search Value' in df_modified.columns:
+                df_modified = df_modified[['Name', 'Search Value', 'Event Count']]
+            else:
+                st.warning("'Search Value' column is missing. Showing other columns.")
+                df_modified = df_modified[['Name', 'Event Count']]
 
-            df_modified = df_modified.drop(columns=[col for col in columns_to_drop if col in df_modified.columns])
-            df_modified.columns = df_modified.columns.str.replace('_', ' ').str.title().str.replace(' ', ' ')
+            # Display the dataframe with columns that exist
             st.dataframe(df_modified, use_container_width=True)
 
-        # Fetch monthly event data based on selected event type, year, and month
-        df_event_monthly = fetch_search_event_data_by_month(engine, selected_event_name, selected_year, selected_month)
+        st.subheader("Monthly Breakdown of Top Users Engaging in Event Searches")
+        # Fetch monthly event data based on selected event type, year, month, and user status
+        df_event_monthly = fetch_search_event_data_by_month(engine, selected_event_name, selected_year, selected_month, user_status)
 
         # Format the month for display
         df_event_monthly['month_start'] = pd.to_datetime(df_event_monthly['month_start']).dt.strftime('%B %Y')
 
-        # Plot the monthly event data
+
         fig_monthly = px.bar(
             df_event_monthly,
             x='month_start',  # Formatted month and year
             y='event_count',  # Event count
-            text='event_count',  # Display event count as text
-            labels={'month_start': 'Month', 'event_count': 'Event Count'},
-            title=f"Monthly Event Count for {event_type}",
+            color='user_status',  # Color by user status (Logged-In vs Logged-Out)
+            labels={'month_start': 'Month-Year', 'event_count': 'Count', 'user_status': 'User Status'},
+            # title=f"Monthly Event Count for {event_type}",
         )
 
-        # Update layout to display counts above each bar
-        fig_monthly.update_traces(texttemplate='%{text}', textposition='outside', insidetextanchor='middle')
+        # Update layout to show count only when hovering over the bars (remove text directly on bars)
+        fig_monthly.update_traces(
+            hovertemplate='Count: %{y}<extra></extra>',  # Show count when hovering
+        )
 
         # Display the Plotly chart for monthly data
         st.plotly_chart(fig_monthly)
 
+        st.title("Social Link Engagement Overview")
+        st.markdown("Members who clicked on other Members social links, indicating engagement and interaction within the platform")
+
         contact_event_type = st.selectbox(
-        'Select Event Type',
+        'Select Social Link Type',
         ['Email', 'Twitter', 'Linkedin', 'Github', 'Telegram']
         )
 
@@ -3683,23 +3862,153 @@ def main():
         query = fetch_data_by_contact_event(contact_event_type, selected_year, selected_month)
         df_result = pd.read_sql(query, engine)
 
-        # Plot the data using Plotly (bar chart for event counts by contact type)
+        df_event_top_10 = df_result.sort_values(by='event_count', ascending=False).head(10)
+
+        df_event_top_10['user_clicked'] = df_event_top_10['name'] + " - " + df_event_top_10['clicked_name']
+
         fig = px.bar(
-            df_result,
-            x='name',  # User's name
+            df_event_top_10,
+            x='user_clicked',  # Use the combined column
             y='event_count',  # Event count
-            # color='type',  # Color by social media type
             text='event_count',  # Display event count as text above bars
-            labels={'name': 'Users', 'event_count': 'Event Count', 'type': 'Social Media Type'},
-            title=f"Top 10 Users for Event: {contact_event_type.capitalize()} Social Links Clicked",
+            labels={'user_clicked': 'User - Clicked Name', 'event_count': 'Count'},
         )
 
-        # Update layout to display counts above each bar
+        # Adjusting the text position
+        fig.update_traces(textposition='outside')  # This moves the text outside the bar
+
+        # Optionally, adjust layout if the text still gets cut off
+        fig.update_layout(
+            margin=dict(l=50, r=50, t=50, b=50),  # Increase margins if necessary
+            xaxis_title='User - Clicked Name',  # You can set specific titles too
+            yaxis_title='Count',
+            # title="Top 10 Users for Event: Social Links Clicked"  # You can uncomment if needed
+        )
+
         fig.update_traces(texttemplate='%{text}', textposition='outside', insidetextanchor='middle')
 
-        # Display the Plotly chart
+        # Adjust layout for better readability
+        fig.update_layout(xaxis_tickangle=45)  # Rotate x-axis labels
         st.plotly_chart(fig)
 
+        with st.expander("Overall Data"):
+
+            # Handle potential missing columns in df_modified
+            df_modified = df_result.copy()
+
+            # Convert column names to lowercase and remove any extra spaces
+            df_modified.columns = df_modified.columns.str.lower().str.replace(' ', '_')
+
+            # Check if 'search_value' exists before referencing it
+            if 'search_value' in df_modified.columns:
+                df_modified = df_modified[['email', 'name', 'search_value', 'event_count', 'user_status']]
+            else:
+                # Select relevant columns if 'search_value' is missing
+                df_modified = df_modified[['clicked_name', 'type', 'name', 'event_count']]
+
+            # Rename columns for better clarity
+            df_modified = df_modified.rename(columns={
+                'clicked_name': 'Clicked By',
+                'type': 'Social Link Type',
+                'name': 'Clicked Member',
+                'event_count': 'Event Count'
+            })
+
+            # Display the dataframe with columns that exist
+            st.dataframe(df_modified, use_container_width=True)
+
+        st.title("Monthly Clicks Breakdown by Page Type")
+
+        page = st.selectbox("Select Page", ["Team Click Through", "Member Click Through", "Project Click Through"])
+        if page == 'Team Click Through':
+            st.subheader("Analysis of Click-Through Rates by Team (By User)")
+            st.markdown("Click-through rates for each team by user, helping to understand how different teams are engaging with the content")
+            df = fetch_team_data_clicked(engine, selected_year, selected_month)
+            # --- Top 10 Users by Click Count Bar Chart ---
+            df_top_10 = df.groupby(['clickedby', 'page_type'], as_index=False).agg({'event_count': 'sum'})
+
+            # Sort by 'event_count' in descending order and get top 10
+            df_top_10_sorted = df_top_10.sort_values(by='event_count', ascending=False).head(10)
+
+            # Plot the bar chart
+            fig_top_10 = px.bar(
+                df_top_10_sorted,
+                x='clickedby',  # User names
+                y='event_count',  # Click count
+                text='event_count',  # Show click count as text
+                labels={'clickedby': 'User', 'event_count': 'Count', 'page_type': 'Page Type'},
+                color='page_type',  # Color by 'page_type'
+            )
+
+            # Update the trace to display count on top of the bars
+            fig_top_10.update_traces(texttemplate='%{text}', textposition='outside', insidetextanchor='middle')
+
+            # Hide the legend if you do not want it displayed
+            fig_top_10.update_layout(showlegend=True)
+
+            # Display the Plotly chart
+            st.plotly_chart(fig_top_10)
+            
+            with st.expander("Overall Data"):
+                # Handle potential missing columns in df
+                df_modified = df.copy()
+
+                # Convert column names to lowercase and remove any extra spaces
+                df_modified.columns = df_modified.columns.str.lower().str.replace(' ', '_')
+
+                # Drop unnecessary columns if they exist
+                df_modified = df_modified[['clickedby', 'team_name', 'page_type', 'event_count']]
+
+                # Rename columns for better clarity
+                df_modified = df_modified.rename(columns={
+                    'clickedby': 'Clicked By',
+                    'team_name': 'Team Name',
+                    'page_type': 'Page Type',
+                    'event_count': 'Event Count'
+                })
+
+                # Handle any potential missing values
+                df_modified = df_modified.dropna()
+
+                # Display the dataframe with the selected columns
+                st.dataframe(df_modified, use_container_width=True)
+            
+            st.subheader("Analysis of Click-Through Rates by Team (Monthly)")
+            st.markdown("Click-through rates by team, helping to identify variations in user engagement across different time periods")
+
+            df['month'] = pd.to_datetime(df['month'], format='%B %Y')  # Adjust format as needed
+
+            # Group the data by month and page_type
+            df_monthwise = df.groupby(['month', 'page_type'], as_index=False)['event_count'].sum()
+
+            # Create the bar chart
+            fig_monthwise = px.bar(
+                df_monthwise,
+                x='month',  # Month on x-axis
+                y='event_count',  # Click count on y-axis
+                color='page_type',  # Color by page_type
+                labels={'month': 'Month-Year', 'event_count': 'Count', 'page_type': 'Page Type'},
+                # title="Monthly Click Count by Page Type"
+            )
+
+            # Customize the layout
+            fig_monthwise.update_layout(
+                xaxis_title='Month-Year',
+                yaxis_title='Click Count',
+                legend_title='Page Type',
+                xaxis=dict(
+                    tickformat='%b %Y',  # Format x-axis ticks as month-year
+                    tickmode='array',
+                    tickvals=df_monthwise['month'].unique(),  # Ensure the months appear in correct order
+                    ticktext=[month.strftime('%b %Y') for month in sorted(df_monthwise['month'].unique())]
+                ),
+            )
+
+            # Display the chart in Streamlit
+            st.plotly_chart(fig_monthwise)
+            
+        elif page == 'Member Click Through':
+            pass
 
 @st.cache_data
 def load_data(file_path):
