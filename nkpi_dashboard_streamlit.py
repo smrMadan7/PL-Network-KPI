@@ -1146,7 +1146,7 @@ def filter_data_by_month_and_year(dataframe, selected_year, selected_month):
     
     return dataframe
 
-def visualize_attendees_by_skill(engine, selected_year, selected_month):
+def visualize_attendees_by_skill(selected_year, selected_month):
     month_mapping = {
         "January": 1, "February": 2, "March": 3, "April": 4,
         "May": 5, "June": 6, "July": 7, "August": 8,
@@ -1754,29 +1754,31 @@ def fetch_data_network_growth_1(table_name):
     """
     return execute_query(query)
 
-def fetch_and_plot_all_entries():
+def fetch_and_plot_all_entries(selected_year, selected_month):
     df_projects = fetch_data_network_growth_1("Project")
     df_projects['category'] = 'Project'  
-
     df_teams = fetch_data_network_growth_1("Team")
     df_teams['category'] = 'Team' 
-
     df_members = fetch_data_network_growth_1("Member")
     df_members['category'] = 'Member' 
-
     df_combined = pd.concat([df_projects, df_teams, df_members], ignore_index=True)
+    df_combined['month_year'] = pd.to_datetime(df_combined['month']).dt.strftime('%Y-%m')
 
+    if selected_year != "All":
+        df_combined = df_combined[df_combined['month_year'].str.startswith(selected_year)]
+    
+    if selected_month != "All":
+        selected_month_num = month_mapping[selected_month]
+        df_combined = df_combined[pd.to_datetime(df_combined['month']).dt.month == selected_month_num]
+
+    all_months = pd.date_range(start=df_combined['month'].min(), end=df_combined['month'].max(), freq='MS')
+    df_complete = pd.DataFrame({'month': all_months})
+    df_combined = pd.merge(df_complete, df_combined, on='month', how='left')
+    df_combined['new_entries'] = df_combined['new_entries'].fillna(0)
     plot_combined_bar_graph(df_combined)
 
 def plot_combined_bar_graph(df):
-    df['month_year'] = pd.to_datetime(df['month'], format='%Y-%m')
-
-    df = df.sort_values(by='month_year')
-
-    all_months = pd.date_range(start=df['month_year'].min(), end=df['month_year'].max(), freq='MS')
-
-    df_complete = pd.DataFrame({'month_year': all_months})
-    df = pd.merge(df_complete, df, on='month_year', how='left')
+    df['month_year'] = pd.to_datetime(df['month']).dt.strftime('%b %Y')
 
     fig = px.bar(
         df,
@@ -1794,7 +1796,7 @@ def plot_combined_bar_graph(df):
         xaxis=dict(
             tickmode='array',
             tickvals=df['month_year'],  
-            ticktext=df['month_year'].dt.strftime('%b %Y'), 
+            ticktext=df['month_year'].unique(), 
             tickangle=45,  
         ),
         showlegend=True,  
@@ -1802,18 +1804,6 @@ def plot_combined_bar_graph(df):
     )
 
     fig.update_traces(textposition='outside', texttemplate='%{text}')
-    fig.update_layout(
-        xaxis=dict(
-            type='category', 
-            categoryorder='array', 
-            categoryarray=df['month_year'].unique(), 
-        ),
-        xaxis_title="Month-Year", 
-        yaxis_title="New Entries", 
-        showlegend=True, 
-    )
-
-
     st.plotly_chart(fig)
 
 
@@ -2565,7 +2555,7 @@ def main():
             st.subheader("Page Type Analytics (Active Users)")
             st.markdown("Analysis of active users breakdown on page type by monthly basis")
 
-            df = fetch_data_from_db_pagetype(engine, selected_year, selected_month)
+            df = fetch_data_from_db_pagetype(selected_year, selected_month)
 
             fig_page_type = plot_events_by_page_type(df)
 
@@ -2668,96 +2658,83 @@ def main():
     elif page == 'IRL Gatherings':
         st.title("IRL Gatherings")
 
+        st.title("Charts with Filters")
         st.subheader("Filters")
-        years = ["All", "2023", "2024"] 
-
-        month_mapping = {
-            "January": 1,
-            "February": 2,
-            "March": 3,
-            "April": 4,
-            "May": 5,
-            "June": 6,
-            "July": 7,
-            "August": 8,
-            "September": 9,
-            "October": 10,
-            "November": 11,
-            "December": 12
-        }
-
+        years = ["All", "2023", "2024"]
         months = [
-            'January', 'February', 'March', 'April', 'May', 'June', 
-            'July', 'August', 'September', 'October', 'November', 'December'
+            "January", "February", "March", "April", "May", "June", 
+            "July", "August", "September", "October", "November", "December"
         ]
-
+        
         selected_year = st.selectbox("Select Year", years, index=0)
         selected_month = st.selectbox("Select Month", ["All"] + months, index=0)
 
         df = fetch_events_by_month_location(selected_year, selected_month)
         df['event_month'] = pd.to_datetime(df['event_month'])
+        if df.empty:
+            fig = px.bar()
+            fig.update_layout(
+                annotations=[dict(
+                    text="No data available for selected filters",
+                    x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=24, color="red", family="Arial Black"),
+                    align="center"
+                )]
+            )
+        else:
+            fig = plot_events_by_month(df)
 
-        st.subheader("Events by Month")
-        st.markdown("Monthly event distribution by geography")
-        fig = plot_events_by_month(df)
-        st.plotly_chart(fig, use_container_width=True)
+        df = fetch_hosts_and_speakers_by_month(selected_year, selected_month)
+        if df.empty:
+            fig_1 = px.bar()
+            fig_1.update_layout(
+                annotations=[dict(
+                    text="No data available for selected filters",
+                    x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=24, color="red", family="Arial Black"),
+                    align="center"
+                )]
+            )
+        else:
+            fig_1 = plot_hosts_and_speakers_distribution(df)
 
-        st.subheader("Event Engagement analysis")
-        st.markdown("User/Team event  attendance")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Events by Month")
+            st.markdown("Monthly event distribution by geography")
+            st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            st.subheader("Distribution of Hosts and Speakers by Month")
+            st.markdown("Distribution of Speakers and Hosting teams/members by month")
+            st.plotly_chart(fig_1, use_container_width=True, key=1)
+
         selected_data_type = st.radio("Select Type", ("User", "Team"))
 
         if selected_data_type == "User":
             st.subheader("Tracking Event Participation by Member Role Over Time")
             event_data = fetch_events_by_month_by_user_1(selected_year, selected_month)
-
-            event_data_melted = event_data.melt(id_vars=["event_name"], 
-                                                value_vars=["host_count", "speaker_count", "attendee_count"],
-                                                var_name="role", value_name="count")
-
-            role_map = {
-                "host_count": "Host",
-                "speaker_count": "Speaker",
-                "attendee_count": "Attendee"
-            }
-
-            event_data_melted['role'] = event_data_melted['role'].map(role_map)
-
-            fig = px.bar(
-                event_data_melted,
-                x="event_name", 
-                y="count",  
-                color="role",  
-                labels={"event_name": "Event Name", "count": "Count", "role": "Role"},
-                hover_data={"event_name": True, "role": True, "count": True},
-                barmode="stack" 
-            )
-
-            fig.update_layout(
-                xaxis_title="Event Name",
-                yaxis_title="Count",
-                xaxis_tickangle=-45, 
-                plot_bgcolor='rgba(0,0,0,0)',  
-                paper_bgcolor='rgba(0,0,0,0)', 
-            )
-
-            st.plotly_chart(fig)
         else:
             st.subheader("Tracking Event Participation by Team Role Over Time")
             event_data = fetch_events_by_month_by_team(selected_year, selected_month)
 
-            event_data_melted = event_data.melt(id_vars=["event_name"], 
-                                                value_vars=["host_count", "speaker_count", "attendee_count"],
-                                                var_name="role", value_name="count")
+        event_data_melted = event_data.melt(id_vars=["event_name"],
+                                            value_vars=["host_count", "speaker_count", "attendee_count"],
+                                            var_name="role", value_name="count")
 
-            role_map = {
-                "host_count": "Host",
-                "speaker_count": "Speaker",
-                "attendee_count": "Attendee"
-            }
-
-            event_data_melted['role'] = event_data_melted['role'].map(role_map)
-
-            fig = px.bar(
+        role_map = {"host_count": "Host", "speaker_count": "Speaker", "attendee_count": "Attendee"}
+        event_data_melted['role'] = event_data_melted['role'].map(role_map)
+        if event_data_melted.empty:
+            fig_2 = px.bar()
+            fig_2.update_layout(
+                annotations=[dict(
+                    text="No data available for selected filters",
+                    x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=24, color="red", family="Arial Black"),
+                    align="center"
+                )]
+            )
+        else:
+            fig_2 = px.bar(
                 event_data_melted,
                 x="event_name", 
                 y="count",  
@@ -2767,52 +2744,51 @@ def main():
                 barmode="stack"  
             )
 
-            fig.update_layout(
+            fig_2.update_layout(
                 xaxis_title="Event Name",
                 yaxis_title="Count",
                 xaxis_tickangle=-45,  
                 plot_bgcolor='rgba(0,0,0,0)',  
                 paper_bgcolor='rgba(0,0,0,0)',  
             )
-
-            st.plotly_chart(fig)
-
-        data = fetch_attendee_data(selected_year, selected_month)
-    
-        st.subheader("Percentage of Attendees with and without Office Hours")
-        fig = px.pie(data, 
+        
+        data = fetch_attendee_data("All", "All")
+        fig_3 = px.pie(data, 
                     names="office_hours_status", 
                     values="attendee_count", 
                     color_discrete_sequence=px.colors.qualitative.Set3)
-        st.plotly_chart(fig)
+        
 
-        visualize_event_topic_distribution(selected_year, selected_month)
-        st.subheader("Attendees Breakdown by Topic / Skill")
-        st.markdown("Distribution of event attendees by Topic / Skill")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Event Engagement Analysis")
+            st.markdown("User/Team event attendance")
+            st.plotly_chart(fig_2)
+        
+        st.title("Charts with No Filters")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Attendees Breakdown by Topic / Skill")
+            st.markdown("Distribution of event attendees by Topic / Skill")
+            option = st.radio("Select Type:", ('Topic', 'Skill'))
+            if option == 'Topic':
+                visualize_attendees_by_topic("All", "All")
+            elif option == 'Skill':
+                visualize_attendees_by_skill("All", "All")
+        with col2:
+            st.subheader("Percentage of Attendees with and without Office Hours")
+            st.plotly_chart(fig_3)
 
-        option = st.radio(
-            "Select Type:",
-            ('Topic', 'Skill')
-        )
+        df = fetch_hosting_teams_by_focus_area("All", "All")
+        fig_4 = plot_hosting_teams_by_focus_area(df)
 
-        if option == 'Topic':
-            visualize_attendees_by_topic(selected_year, selected_month)
-        elif option == 'Skill':
-            visualize_attendees_by_skill(selected_year, selected_month)
-    
-        df = fetch_hosting_teams_by_focus_area(selected_year, selected_month)
-
-        st.subheader("Focus area segmentation of Hosting Teams")
-        st.markdown("Distribution of Hosting Teams by focus areas")
-        fig = plot_hosting_teams_by_focus_area(df)
-        st.plotly_chart(fig, use_container_width=True)
-
-        df = fetch_hosts_and_speakers_by_month(selected_year, selected_month)
-
-        st.subheader("Distribution of Hosts and Speakers by Month")
-        st.markdown("Distribution of Speakers and Hosting teams/members by month")
-        fig = plot_hosts_and_speakers_distribution(df)
-        st.plotly_chart(fig, use_container_width=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Focus Area Segmentation of Hosting Teams")
+            st.markdown("Distribution of Hosting Teams by focus areas")
+            st.plotly_chart(fig_4, use_container_width=True)
+        with col2:
+            visualize_event_topic_distribution("All", "All")
 
     elif page == 'Hackathons':
         st.title("Hackathons")
@@ -2859,7 +2835,7 @@ def main():
         st.title("Network Growth")
 
         st.subheader("Filters")
-        years = ["All", "2024"] 
+        years = ["All","2021","2022","2023","2024"] 
 
         month_mapping = {
             "January": 1,
@@ -2885,9 +2861,8 @@ def main():
         selected_month = st.selectbox("Select Month", ["All"] + months, index=0)
 
         st.subheader("New Entries Trend by Month")
-        fetch_and_plot_all_entries()
+        fetch_and_plot_all_entries(selected_year, selected_month)
 
-        st.subheader("Distribution graph of people by skills")
         df = fetch_member_by_skills()
         fig = px.pie(
             df, 
@@ -2903,45 +2878,53 @@ def main():
             legend_title="Skills",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         )
-        st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("Distribution graph of Team by Focus Area")
         df = teams_by_focus_area()
 
-        fig = px.pie(
+        fig_1 = px.pie(
             df, 
             names="focus_area",  
             values="Teams", 
             color_discrete_sequence=px.colors.qualitative.Pastel  
         )
 
-        fig.update_traces(
+        fig_1.update_traces(
             hovertemplate="<b>Skill:</b> %{label}<br><b>Members:</b> %{value}<br><b>Percent:</b> %{percent}<extra></extra>"
         )
-        fig.update_layout(
+        fig_1.update_layout(
             legend_title="Focus Area",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         )
-        st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("Distribution graph of Project by Focus Area")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Distribution graph of people by skills")
+            st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            st.subheader("Distribution graph of Team by Focus Area")
+            st.plotly_chart(fig_1, use_container_width=True)
+
         df = projects_by_focus_area()
 
-        fig = px.pie(
+        fig_2 = px.pie(
             df, 
             names="focus_area",  
             values="Projects", 
             color_discrete_sequence=px.colors.qualitative.Pastel  
         )
 
-        fig.update_traces(
+        fig_2.update_traces(
             hovertemplate="<b>Skill:</b> %{label}<br><b>Members:</b> %{value}<br><b>Percent:</b> %{percent}<extra></extra>"
         )
-        fig.update_layout(
+        fig_2.update_layout(
             legend_title="Focus Area",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Distribution graph of Project by Focus Area")
+            st.plotly_chart(fig_2, use_container_width=True)
 
     elif page == 'Usage Activity':
         st.title("Usage Activity")
@@ -2991,8 +2974,6 @@ def main():
             ['All', 'Logged-In', 'Logged-Out']
         )
 
-        st.subheader('Top Users Engaging with Event Searches')
-        st.markdown("Shows Users who are most active in searching for events")
         df_event = fetch_search_event_data(selected_event_name, selected_year, selected_month, user_status)
 
         df_event_top_10 = df_event.sort_values(by='event_count', ascending=False).head(10)
@@ -3011,8 +2992,6 @@ def main():
             labels={'user_search_combined': 'User - Search Value', 'event_count': 'Count', 'search_value': 'Search Value'}        )
 
         fig.update_traces(texttemplate='%{text}', textposition='outside', insidetextanchor='middle')
-
-        st.plotly_chart(fig)
 
         with st.expander("Overall Data"):
 
@@ -3036,7 +3015,6 @@ def main():
 
             st.dataframe(df_modified, use_container_width=True)
 
-        st.subheader("Monthly Breakdown of Top Users Engaging in Event Searches")
         df_event_monthly = fetch_search_event_data_by_month(selected_event_name, selected_year, selected_month, user_status)
 
         df_event_monthly['month_start'] = pd.to_datetime(df_event_monthly['month_start']).dt.strftime('%B %Y')
@@ -3054,7 +3032,14 @@ def main():
             hovertemplate='Count: %{y}<extra></extra>',  
         )
 
-        st.plotly_chart(fig_monthly)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader('Top Users Engaging with Event Searches')
+            st.markdown("Shows Users who are most active in searching for events")
+            st.plotly_chart(fig)
+        with col2:
+            st.subheader("Monthly Breakdown of Top Users Engaging in Event Searches")
+            st.plotly_chart(fig_monthly)
 
         st.title("Social Link Engagement Overview")
         st.markdown("Members who clicked on other Members social links, indicating engagement and interaction within the platform")
@@ -3126,8 +3111,6 @@ def main():
 
         page = st.selectbox("Select Page", ["Team Click Through", "Member Click Through", "Project Click Through"])
         if page == 'Team Click Through':
-            st.subheader("Analysis of Click-Through Rates by Team (By User)")
-            st.markdown("Click-through rates for each team by user, helping to understand how different teams are engaging with the content")
             df = fetch_team_data_clicked(selected_year, selected_month)
             df_top_10 = df.groupby(['clickedby', 'page_type'], as_index=False).agg({'event_count': 'sum'})
 
@@ -3145,8 +3128,6 @@ def main():
             fig_top_10.update_traces(texttemplate='%{text}', textposition='outside', insidetextanchor='middle')
 
             fig_top_10.update_layout(showlegend=True)
-
-            st.plotly_chart(fig_top_10)
             
             with st.expander("Overall Data"):
                 df_modified = df.copy()
@@ -3165,9 +3146,6 @@ def main():
                 df_modified = df_modified.dropna()
 
                 st.dataframe(df_modified, use_container_width=True)
-            
-            st.subheader("Analysis of Click-Through Rates by Team (Monthly)")
-            st.markdown("Click-through rates by team, helping to identify variations in user engagement across different time periods")
 
             df['month'] = pd.to_datetime(df['month'], format='%B %Y')  
 
@@ -3192,14 +3170,21 @@ def main():
                     ticktext=[month.strftime('%b %Y') for month in sorted(df_monthwise['month'].unique())]
                 ),
             )
-
-            st.plotly_chart(fig_monthwise)
             
         elif page == 'Member Click Through':
             pass
 
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Analysis of Click-Through Rates by Team (By User)")
+            st.markdown("Click-through rates for each team by user, helping to understand how different teams are engaging with the content")
+            st.plotly_chart(fig_top_10)
+        with col2:
+            st.subheader("Analysis of Click-Through Rates by Team (Monthly)")
+            st.markdown("Click-through rates by team, helping to identify variations in user engagement across different time periods")
+            st.plotly_chart(fig_monthwise)
+
         st.title("Husky Interaction")
-        st.subheader("Interaction with Husky")
         df = husky_prompt_interaction()
 
         fig = px.pie(
@@ -3216,25 +3201,30 @@ def main():
             legend_title="User Name",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         )
-        st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("Husky Feedback")
         df = husky_feedback()
-        fig = px.pie(
+        fig_1 = px.pie(
             df, 
             names="name",  
             values="interaction_count", 
             color_discrete_sequence=px.colors.qualitative.Pastel  
         )
 
-        fig.update_traces(
+        fig_1.update_traces(
             hovertemplate="<b>UserName:</b> %{label}<br><b>Interaction count:</b> %{value}<br><b>Percent:</b> %{percent}<extra></extra>"
         )
-        fig.update_layout(
+        fig_1.update_layout(
             legend_title="User Name",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         )
-        st.plotly_chart(fig, use_container_width=True)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Interaction with Husky")
+            st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            st.subheader("Husky Feedback")
+            st.plotly_chart(fig_1, use_container_width=True)
 
 @st.cache_data
 def load_data(file_path):
